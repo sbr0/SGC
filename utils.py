@@ -96,6 +96,19 @@ def sgc_precompute(features, adj, degree):
     precompute_time = perf_counter()-t
     return features, precompute_time
 
+def ssgc_precompute(features, adj, degree):
+    t = perf_counter()
+    features = features.to_dense()
+    for i in range(degree):
+        new_features = torch.empty_like(features)
+        for i in range(list(adj.size())[0]):
+            for j in range(list(features.size())[1]):
+                new_features[i][j] = 0
+                for k in range(list(adj.size())[1]):
+                    new_features[i][j] += adj[i][k] * features[k][j]
+    precompute_time = perf_counter()-t
+    return new_features, precompute_time
+
 def set_seed(seed, cuda):
     np.random.seed(seed)
     torch.manual_seed(seed)

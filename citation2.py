@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
-from utils import load_citation, sgc_precompute, set_seed
+from utils import load_citation, sgc_precompute, set_seed, ssgc_precompute
 from models import get_model
 from metrics import accuracy
 import pickle as pkl
@@ -38,10 +38,13 @@ print("labels: ", labels.size())
 
 model = get_model(args.model, features.size(1), labels.max().item()+1, args.hidden, args.dropout, args.cuda)
 
+
+new_features = torch.empty_like(features)
+new_features, precomp2 = ssgc_precompute(features, adj, args.degree)
 if args.model == "SGC": features, precompute_time = sgc_precompute(features, adj, args.degree)
 print("{:.4f}s".format(precompute_time))
 
-print("features: ", features.size())
+print(torch.all(torch.eq(new_features, features)))
 
 def train_regression(model,
                      train_features, train_labels,
@@ -72,10 +75,19 @@ def test_regression(model, test_features, test_labels):
     model.eval()
     return accuracy(model(test_features), test_labels)
 
+
 if args.model == "SGC":
     model, acc_val, train_time = train_regression(model, features[idx_train], labels[idx_train], features[idx_val], labels[idx_val],
                      args.epochs, args.weight_decay, args.lr, args.dropout)
     acc_test = test_regression(model, features[idx_test], labels[idx_test])
+
+
+
+    test_res = torch.mm(features[idx_test], torch.transpose(model.W.weight.data, 0, 1))
+    print("DIY test res", test_res.size())
+    print("model test res: " , model(features[idx_test]).size())
+    #print("DIFF: ", torch.eq(test_res, model(features[idx_test])))
+
     print(list(model.parameters())[1])
     for param in model.parameters():
         print(type(param.data), param.size())
