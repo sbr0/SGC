@@ -98,11 +98,14 @@ def sgc_precompute(features, adj, degree):
 
 def ssgc_precompute(features, adj, degree):
     t = perf_counter()
-    features = features.to_dense()
-    for i in range(degree):
+    adj = adj.to_dense()
+    for d in range(degree):
+        print("Degree: ", d)
         new_features = torch.empty_like(features)
         for i in range(list(adj.size())[0]):
+            print("Outer:", i)
             for j in range(list(features.size())[1]):
+                print("Inner", j)
                 new_features[i][j] = 0
                 for k in range(list(adj.size())[1]):
                     new_features[i][j] += adj[i][k] * features[k][j]

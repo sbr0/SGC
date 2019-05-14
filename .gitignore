@@ -1,3 +1,6 @@
 data/*reddit*
 downstream/TextSGC/data
 __pycache__/
+.gdb*
+peda*
+sgc
