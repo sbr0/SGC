@@ -64,6 +64,7 @@ def load_citation(dataset_str="cora", normalization="AugNormAdj", cuda=True):
     labels = np.vstack((ally, ty))
     labels[test_idx_reorder, :] = labels[test_idx_range, :]
 
+
     idx_test = test_idx_range.tolist()
     idx_train = range(len(y))
     idx_val = range(len(y), len(y)+500)
@@ -86,6 +87,18 @@ def load_citation(dataset_str="cora", normalization="AugNormAdj", cuda=True):
         idx_train = idx_train.cuda()
         idx_val = idx_val.cuda()
         idx_test = idx_test.cuda()
+
+    #print(graph)
+    # print sparce adjacency matrix to file using uint32_t format
+    with open('sparce.bin', 'wb') as outfile:
+        graph_size = features.size()[0]
+        outfile.write(graph_size.to_bytes(4, byteorder='big'))
+        for i in range(graph_size):
+            num_neighbors = len(graph[i])
+            outfile.write(num_neighbors.to_bytes(4, byteorder='big'))
+            for j in range(num_neighbors):
+                outfile.write(graph[i][j].to_bytes(4, byteorder='big'))
+
 
     return adj, features, labels, idx_train, idx_val, idx_test
 

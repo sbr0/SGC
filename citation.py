@@ -11,6 +11,7 @@ import pickle as pkl
 from args import get_citation_args
 from time import perf_counter
 import json
+import struct
 
 # Arguments
 args = get_citation_args()
@@ -39,11 +40,11 @@ print("labels: ", labels.size())
 #with open('adj.json', 'w') as outfile:
 #    json.dump(adj.to_dense().numpy().tolist(), outfile)
 
-with open('idx_val.json', 'w') as outfile:
-    json.dump(idx_val.numpy().tolist(), outfile)
+#with open('idx_val.json', 'w') as outfile:
+#    json.dump(idx_val.numpy().tolist(), outfile)
 
-with open('idx_test.json', 'w') as outfile:
-    json.dump(idx_test.numpy().tolist(), outfile)
+#with open('idx_test.json', 'w') as outfile:
+#    json.dump(idx_test.numpy().tolist(), outfile)
 
 model = get_model(args.model, features.size(1), labels.max().item()+1, args.hidden, args.dropout, args.cuda)
 
@@ -53,7 +54,17 @@ new_features = torch.empty_like(features)
 if args.model == "SGC": features, precompute_time = sgc_precompute(features, adj, args.degree)
 print("{:.4f}s".format(precompute_time))
 
+# print result of precomputation
+with open('python_precomp.bin', 'wb') as outfile:
+    graph_size = features.size()[0]
+    feat_size = features.size()[1]
+    for i in range(graph_size):
+        for j in range(feat_size):
+            outfile.write(bytearray(struct.pack("f",features[i][j].numpy())))
+
+
 #print(torch.all(torch.eq(new_features, features)))
+
 
 def train_regression(model,
                      train_features, train_labels,
