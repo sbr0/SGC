@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <time.h>
+#include <stdbool.h>
 
 #define DEGREE 2
 
@@ -105,6 +106,51 @@ float* generate_degree_matrix(uint32_t* adj) {
     return degree_matrix;
 }
 
+void* sgc_precompute (uint32_t* adj, float* deg) {
+    printf("SGC_precomp\n");
+    uint32_t i = 0, j = 0, m = 0;
+    uint32_t nb_nodes = adj[i++];
+    size_t s_capacity = 4 * nb_nodes * sizeof(float); 
+    float * s = (float *) malloc(s_capacity);
+    uint32_t base_node = 0, dest_node, neighbor_nb;
+    bool self_loop;
+    s[j++] = nb_nodes; 
+    printf("nb_nodes = %zu\n", nb_nodes);
+    printf("s_capacity: %zu\n", s_capacity);
+    while (base_node < nb_nodes) {
+        printf("[%zu]:[", base_node);
+        self_loop = false;
+        neighbor_nb = adj[i++];
+        s[j++] = neighbor_nb + 1; // +1 for self-loop
+        for (m = 0; m < neighbor_nb; m++) {
+            // Check if s still has room
+            if (j*sizeof(uint32_t) > s_capacity - 6*sizeof(uint32_t)) {
+                s_capacity *= 2;
+                s = (float *) realloc(s, s_capacity);
+                printf("\nREALLOC_SUCCESS\n");
+            }
+            dest_node = adj[i++];
+            // add self loop
+            if (dest_node > base_node && !self_loop) {
+                s[j++] = base_node;
+                s[j++] = (float)(deg[base_node] * deg[base_node]);
+                self_loop = true;
+            }
+            // Normalise
+            s[j++] = dest_node; // copy over second node number 
+            s[j++] = (float)(deg[base_node] * deg[dest_node]);
+            /* printf(" [%zu]: %.3f", dest_node, s[j-1]); */
+        } 
+        base_node ++;
+        printf("%zu]",j);
+    }
+    printf("SUCCESS\n");
+    s = realloc(s, j); // fit memory allocation to final size of s
+    return s;
+    // TODO Write result to file and compare with python results
+}
+
+
 /* void read_sparse_array() { */
 /*     FILE *f; */
 /*     float *new_features = calloc(GRAPH_SIZE*FEATURE_DEPTH, sizeof(float)); */
@@ -134,15 +180,18 @@ int main() {
     
     uint32_t * adj = read_file("sparce.bin");
     float * degree = generate_degree_matrix(adj);
-    full_matrix_mult();
+    void * s = sgc_precompute(adj, degree);
 
-    clock_t end = clock();
-    double time_spent = (double)(end - begin) / CLOCKS_PER_SEC;
-    printf("Precomputation time: %lf\n", time_spent);
+    /* full_matrix_mult(); */
 
-    print_matrix_to_file("preprocess.bin", GRAPH_SIZE, FEATURE_DEPTH, FEAT);
+    /* clock_t end = clock(); */
+    /* double time_spent = (double)(end - begin) / CLOCKS_PER_SEC; */
+    /* printf("Precomputation time: %lf\n", time_spent); */
+
+    /* print_matrix_to_file("preprocess.bin", GRAPH_SIZE, FEATURE_DEPTH, FEAT); */
 
     free(adj);
     free(degree);
+    free(s);
     return 0;
 }
