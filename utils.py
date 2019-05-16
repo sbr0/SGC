@@ -6,6 +6,7 @@ import pickle as pkl
 import networkx as nx
 from normalization import fetch_normalization, row_normalize
 from time import perf_counter
+import math
 
 def parse_index_file(filename):
     """Parse index file."""
@@ -60,7 +61,10 @@ def load_citation(dataset_str="cora", normalization="AugNormAdj", cuda=True):
     features = sp.vstack((allx, tx)).tolil()
     features[test_idx_reorder, :] = features[test_idx_range, :]
     adj = nx.adjacency_matrix(nx.from_dict_of_lists(graph))
+    #print(adj)
+    # What is the point of this? Gives same result
     adj = adj + adj.T.multiply(adj.T > adj) - adj.multiply(adj.T > adj)
+    # print(adj)
     labels = np.vstack((ally, ty))
     labels[test_idx_reorder, :] = labels[test_idx_range, :]
 
@@ -69,7 +73,25 @@ def load_citation(dataset_str="cora", normalization="AugNormAdj", cuda=True):
     idx_train = range(len(y))
     idx_val = range(len(y), len(y)+500)
 
+
+    adj1 = sparse_mx_to_torch_sparse_tensor(adj).to_dense() # A
+    SIZE = adj1.size()[0]
+    adj1 = adj1.add(torch.eye(SIZE)) # A^
+    print("^A: ", adj1)
+    adj2 = torch.sum(adj1, dim=1)
+    adj3 = torch.zeros(SIZE, SIZE)
+
+    for i in range(SIZE):
+        adj3[i][i] = adj2[i]
+    adj3 = torch.inverse(adj3.sqrt())
+    print("^D^-1/2: ", adj3)
+    MANUAL_adj = torch.mm(adj3, torch.mm(adj1, adj3))
+    print("S: ", MANUAL_adj)
+    # This is where normalisation happens
     adj, features = preprocess_citation(adj, features, normalization)
+    OG_adj = sparse_mx_to_torch_sparse_tensor(adj).to_dense()
+    print("OG == MANUAL: ", torch.all(torch.eq(OG_adj, MANUAL_adj)))
+
 
     # porting to pytorch
     features = torch.FloatTensor(np.array(features.todense())).float()
@@ -90,14 +112,14 @@ def load_citation(dataset_str="cora", normalization="AugNormAdj", cuda=True):
 
     #print(graph)
     # print sparce adjacency matrix to file using uint32_t format
-    with open('sparce.bin', 'wb') as outfile:
-        graph_size = features.size()[0]
-        outfile.write(graph_size.to_bytes(4, byteorder='big'))
-        for i in range(graph_size):
-            num_neighbors = len(graph[i])
-            outfile.write(num_neighbors.to_bytes(4, byteorder='big'))
-            for j in range(num_neighbors):
-                outfile.write(graph[i][j].to_bytes(4, byteorder='big'))
+    # with open('sparce.bin', 'wb') as outfile:
+    #     graph_size = features.size()[0]
+    #     outfile.write(graph_size.to_bytes(4, byteorder='big'))
+    #     for i in range(graph_size):
+    #         num_neighbors = len(graph[i])
+    #         outfile.write(num_neighbors.to_bytes(4, byteorder='big'))
+    #         for j in range(num_neighbors):
+    #             outfile.write(graph[i][j].to_bytes(4, byteorder='big'))
 
 
     return adj, features, labels, idx_train, idx_val, idx_test

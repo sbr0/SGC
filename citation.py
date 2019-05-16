@@ -55,12 +55,12 @@ if args.model == "SGC": features, precompute_time = sgc_precompute(features, adj
 print("{:.4f}s".format(precompute_time))
 
 # print result of precomputation
-with open('python_precomp.bin', 'wb') as outfile:
-    graph_size = features.size()[0]
-    feat_size = features.size()[1]
-    for i in range(graph_size):
-        for j in range(feat_size):
-            outfile.write(bytearray(struct.pack("f",features[i][j].numpy())))
+# with open('python_precomp.bin', 'wb') as outfile:
+#     graph_size = features.size()[0]
+#     feat_size = features.size()[1]
+#     for i in range(graph_size):
+#         for j in range(feat_size):
+#             outfile.write(bytearray(struct.pack("f",features[i][j].numpy())))
 
 
 #print(torch.all(torch.eq(new_features, features)))
