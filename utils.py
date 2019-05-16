@@ -7,6 +7,7 @@ import networkx as nx
 from normalization import fetch_normalization, row_normalize
 from time import perf_counter
 import math
+import struct
 
 def parse_index_file(filename):
     """Parse index file."""
@@ -77,7 +78,7 @@ def load_citation(dataset_str="cora", normalization="AugNormAdj", cuda=True):
     adj1 = sparse_mx_to_torch_sparse_tensor(adj).to_dense() # A
     SIZE = adj1.size()[0]
     adj1 = adj1.add(torch.eye(SIZE)) # A^
-    print("^A: ", adj1)
+    print("^A: ", adj1[4])
     adj2 = torch.sum(adj1, dim=1)
     adj3 = torch.zeros(SIZE, SIZE)
 
@@ -92,6 +93,11 @@ def load_citation(dataset_str="cora", normalization="AugNormAdj", cuda=True):
     OG_adj = sparse_mx_to_torch_sparse_tensor(adj).to_dense()
     print("OG == MANUAL: ", torch.all(torch.eq(OG_adj, MANUAL_adj)))
 
+
+    # print degree matrix to file using float format
+    # with open('python_degree.bin', 'wb') as outfile:
+    #     for i in range(SIZE):
+    #         outfile.write(struct.pack('f', adj3.numpy()[i][i]))
 
     # porting to pytorch
     features = torch.FloatTensor(np.array(features.todense())).float()
@@ -110,16 +116,18 @@ def load_citation(dataset_str="cora", normalization="AugNormAdj", cuda=True):
         idx_val = idx_val.cuda()
         idx_test = idx_test.cuda()
 
-    #print(graph)
-    # print sparce adjacency matrix to file using uint32_t format
+    # # print(graph)
+    # # print sparce adjacency matrix to file using uint32_t format
     # with open('sparce.bin', 'wb') as outfile:
     #     graph_size = features.size()[0]
-    #     outfile.write(graph_size.to_bytes(4, byteorder='big'))
+    #     outfile.write(graph_size.to_bytes(4, byteorder='little'))
     #     for i in range(graph_size):
+    #         graph[i] = list(set(graph[i])) # Remove duplicates. Necessary!
+    #         graph[i].sort() # Not necessary but makes more sense?
     #         num_neighbors = len(graph[i])
-    #         outfile.write(num_neighbors.to_bytes(4, byteorder='big'))
+    #         outfile.write(num_neighbors.to_bytes(4, byteorder='little'))
     #         for j in range(num_neighbors):
-    #             outfile.write(graph[i][j].to_bytes(4, byteorder='big'))
+    #             outfile.write(graph[i][j].to_bytes(4, byteorder='little'))
 
 
     return adj, features, labels, idx_train, idx_val, idx_test
