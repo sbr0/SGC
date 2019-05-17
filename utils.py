@@ -99,6 +99,23 @@ def load_citation(dataset_str="cora", normalization="AugNormAdj", cuda=True):
     #     for i in range(SIZE):
     #         outfile.write(struct.pack('f', adj3.numpy()[i][i]))
 
+    # # print normalised adjacency matrix with self loops
+    # with open('python_norm_adj.bin', 'wb') as outfile:
+    #     outfile.write(SIZE.to_bytes(4, byteorder='little'))
+    #     for i in range(SIZE):
+    #         neighbour_count = 0
+    #         neighbour_list = list()
+    #         for j in range(SIZE):
+    #             if OG_adj[i][j] != 0:
+    #                 neighbour_count += 1
+    #                 neighbour_list.append(j)
+    #         neighbour_list.sort()
+    #         outfile.write(neighbour_count.to_bytes(4, byteorder='little'))
+    #         for j in neighbour_list:
+    #             outfile.write(j.to_bytes(4, byteorder='little'))
+    #             outfile.write(struct.pack('f', OG_adj.numpy()[i][j]))
+
+
     # porting to pytorch
     features = torch.FloatTensor(np.array(features.todense())).float()
     labels = torch.LongTensor(labels)

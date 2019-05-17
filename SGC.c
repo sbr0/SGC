@@ -1,11 +1,11 @@
-#define SIMPLE
+/* #define SIMPLE */
 
 #ifndef SIMPLE
-    #include "data/adj.h"
+    /* #include "data/adj.h" */
     #include "data/feat.h"
-    #include "data/idx_test.h"
-    #include "data/idx_train.h"
-    #include "data/idx_val.h"
+    /* #include "data/idx_test.h" */
+    /* #include "data/idx_train.h" */
+    /* #include "data/idx_val.h" */
     #define GRAPH_SIZE 2708
     #define FEATURE_DEPTH 1433
 #endif
@@ -22,6 +22,11 @@
 #include <stdbool.h>
 
 #define DEGREE 2
+
+typedef union Data_union {
+    uint32_t u;
+    float f;
+} dataUnion;
 
 void copy_matrix(uint32_t dim1, uint32_t dim2, float src[dim1*dim2], float dest[dim1][dim2]) {
     uint32_t i, j;
@@ -46,24 +51,25 @@ void print_matrix_to_file(char* filename, uint32_t dim1, uint32_t dim2, float ma
     fclose(f);
 }
 
-void full_matrix_mult () {
-    float *new_features = malloc(GRAPH_SIZE*FEATURE_DEPTH*sizeof(float));
-    uint16_t d;
-    uint32_t i, j, k;
-    for(d = 0; d < DEGREE; d++){
-        printf("Degree: %d\n", d);
-        for(i = 0; i < GRAPH_SIZE; i++) {
-            for(j = 0; j < FEATURE_DEPTH; j++) {
-                new_features[i*FEATURE_DEPTH +j] = 0;
-                for(k = 0; k < GRAPH_SIZE; k++) {
-                    new_features[i*FEATURE_DEPTH + j] += ADJ[i][k] * FEAT[k][j];
-                }
-            }
-        }
-        copy_matrix((uint32_t)GRAPH_SIZE, (uint32_t)FEATURE_DEPTH, new_features, FEAT);
-    }
-    free(new_features);
-}
+
+/* void full_matrix_mult () { */
+/*     float *new_features = malloc(GRAPH_SIZE*FEATURE_DEPTH*sizeof(float)); */
+/*     uint16_t d; */
+/*     uint32_t i, j, k; */
+/*     for(d = 0; d < DEGREE; d++){ */
+/*         printf("Degree: %d\n", d); */
+/*         for(i = 0; i < GRAPH_SIZE; i++) { */
+/*             for(j = 0; j < FEATURE_DEPTH; j++) { */
+/*                 new_features[i*FEATURE_DEPTH +j] = 0; */
+/*                 for(k = 0; k < GRAPH_SIZE; k++) { */
+/*                     new_features[i*FEATURE_DEPTH + j] += ADJ[i][k] * FEAT[k][j]; */
+/*                 } */
+/*             } */
+/*         } */
+/*         copy_matrix((uint32_t)GRAPH_SIZE, (uint32_t)FEATURE_DEPTH, new_features, FEAT); */
+/*     } */
+/*     free(new_features); */
+/* } */
 
 // mem_file must be freed by caller
 uint32_t* read_file(char* filename) {
@@ -111,43 +117,78 @@ void* sgc_precompute (uint32_t* adj, float* deg) {
     uint32_t i = 0, j = 0, m = 0;
     uint32_t nb_nodes = adj[i++];
     size_t s_capacity = 4 * nb_nodes * sizeof(float); 
-    float * s = (float *) malloc(s_capacity);
+    dataUnion * s = malloc(s_capacity);
     uint32_t base_node = 0, dest_node, neighbor_nb;
     bool self_loop;
-    s[j++] = nb_nodes; 
+    s[j++].u = nb_nodes; 
     printf("nb_nodes = %zu\n", nb_nodes);
     printf("s_capacity: %zu\n", s_capacity);
     while (base_node < nb_nodes) {
-        printf("[%zu]:[", base_node);
         self_loop = false;
         neighbor_nb = adj[i++];
-        s[j++] = neighbor_nb + 1; // +1 for self-loop
+        s[j++].u = neighbor_nb + 1; // +1 for self-loop
         for (m = 0; m < neighbor_nb; m++) {
             // Check if s still has room
             if (j*sizeof(uint32_t) > s_capacity - 6*sizeof(uint32_t)) {
                 s_capacity *= 2;
-                s = (float *) realloc(s, s_capacity);
+                s = realloc(s, s_capacity);
                 printf("\nREALLOC_SUCCESS\n");
             }
             dest_node = adj[i++];
             // add self loop
             if (dest_node > base_node && !self_loop) {
-                s[j++] = base_node;
-                s[j++] = (float)(deg[base_node] * deg[base_node]);
+                s[j++].u = base_node;
+                s[j++].f = (float)(deg[base_node] * deg[base_node]);
                 self_loop = true;
             }
             // Normalise
-            s[j++] = dest_node; // copy over second node number 
-            s[j++] = (float)(deg[base_node] * deg[dest_node]);
-            /* printf(" [%zu]: %.3f", dest_node, s[j-1]); */
+            s[j++].u = dest_node; // copy over second node number 
+            s[j++].f = (float)(deg[base_node] * deg[dest_node]);
         } 
-        base_node ++;
-        printf("%zu]",j);
+        // If self loop condition was never reached because all dest nodes < base node
+        if (!self_loop) {
+            s[j++].u = base_node;
+            s[j++].f = (float)(deg[base_node] * deg[base_node]);
+            self_loop = true;
+        }
+        base_node++;
     }
-    printf("SUCCESS\n");
-    s = realloc(s, j); // fit memory allocation to final size of s
+    s = realloc(s, j * sizeof(float)); // fit memory allocation to final size of s
+
+    // Print result to file
+    FILE *f = fopen("c_norm_adj.bin", "wb");
+    if (f == NULL) {
+        printf("Error opening file!\n");
+        exit(1);
+    }
+    for(i = 0; i < j; i++) {
+        fwrite(&s[i], sizeof(float), 1, f);
+    }
+    fclose(f);
+
     return s;
-    // TODO Write result to file and compare with python results
+}
+
+// TODO Test
+float * sparce_matrix_mult(dataUnion * s, float * features) {
+    uint32_t i = 0, j = 0, base_node = 0, dest_node = 0, neighbor_nb;
+    uint32_t nb_nodes = s[i++].u;  
+    float adj_weight, new_feature;
+    float * new_features = calloc(nb_nodes * FEATURE_DEPTH, sizeof(float));
+    while (base_node < nb_nodes) {
+        neighbor_nb = s[i++].u;
+        for (uint32_t k = 0; k < neighbor_nb; k++) {
+            dest_node = s[i++].u;
+            adj_weight = s[i++].f;
+            // apply weight to all relevant features (Weight stationary)
+            for (uint32_t m = 0; m < FEATURE_DEPTH; m++) {
+                new_feature += adj_weight * features[base_node*FEATURE_DEPTH + m];
+            }
+        }
+        new_features[j++] = new_feature;
+        base_node++;
+    }
+    return new_features;
 }
 
 
@@ -180,7 +221,8 @@ int main() {
     
     uint32_t * adj = read_file("sparce.bin");
     float * degree = generate_degree_matrix(adj);
-    void * s = sgc_precompute(adj, degree);
+    dataUnion * s = sgc_precompute(adj, degree);
+    sparce_matrix_mult(s, FEAT);
 
     /* full_matrix_mult(); */
 
