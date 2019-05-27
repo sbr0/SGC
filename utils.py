@@ -134,18 +134,21 @@ def load_citation(dataset_str="cora", normalization="AugNormAdj", cuda=True):
         idx_test = idx_test.cuda()
 
     # # print(graph)
-    # # print sparce adjacency matrix to file using uint32_t format
-    # with open('sparce.bin', 'wb') as outfile:
-    #     graph_size = features.size()[0]
-    #     outfile.write(graph_size.to_bytes(4, byteorder='little'))
-    #     for i in range(graph_size):
-    #         graph[i] = list(set(graph[i])) # Remove duplicates. Necessary!
-    #         graph[i].sort() # Not necessary but makes more sense?
-    #         num_neighbors = len(graph[i])
-    #         outfile.write(num_neighbors.to_bytes(4, byteorder='little'))
-    #         for j in range(num_neighbors):
-    #             outfile.write(graph[i][j].to_bytes(4, byteorder='little'))
-
+    # # print sparse adjacency matrix to file using uint32_t format
+    # with open('adj.bin', 'wb') as adj_of:
+    #     with open('adj_weights.bin', 'wb') as adj_weights_of:
+    #         graph_size = features.size()[0]
+    #         adj_of.write(graph_size.to_bytes(4, byteorder='little'))
+    #         adj_weights_of.write(graph_size.to_bytes(4, byteorder='little'))
+    #         for i in range(graph_size):
+    #             graph[i] = list(set(graph[i])) # Remove duplicates. Necessary!
+    #             graph[i].sort() # Not necessary but makes more sense?
+    #             num_neighbors = len(graph[i])
+    #             adj_of.write(num_neighbors.to_bytes(4, byteorder='little'))
+    #             adj_weights_of.write(num_neighbors.to_bytes(4, byteorder='little'))
+    #             for j in range(num_neighbors):
+    #                 adj_of.write(graph[i][j].to_bytes(4, byteorder='little'))
+    #                 adj_weights_of.write(struct.pack('f', np.float(1)))
 
     return adj, features, labels, idx_train, idx_val, idx_test
 

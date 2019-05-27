@@ -48,13 +48,23 @@ print("labels: ", labels.size())
 
 model = get_model(args.model, features.size(1), labels.max().item()+1, args.hidden, args.dropout, args.cuda)
 
+# # print feature matrix
+# with open('features.bin', 'wb') as outfile:
+#     graph_size = features.size()[0]
+#     feat_size = features.size()[1]
+#     for i in range(graph_size):
+#         for j in range(feat_size):
+#             outfile.write(bytearray(struct.pack("f",features[i][j].numpy())))
+
+# print(features)
 
 new_features = torch.empty_like(features)
 #new_features, precomp2 = ssgc_precompute(features, adj, args.degree)
 if args.model == "SGC": features, precompute_time = sgc_precompute(features, adj, args.degree)
 print("{:.4f}s".format(precompute_time))
 
-# print result of precomputation
+# print(features)
+# # print result of precomputation
 # with open('python_precomp.bin', 'wb') as outfile:
 #     graph_size = features.size()[0]
 #     feat_size = features.size()[1]
@@ -65,7 +75,17 @@ print("{:.4f}s".format(precompute_time))
 
 #print(torch.all(torch.eq(new_features, features)))
 
+# print starting weights (aiming distribution [-sqrt(1/d), sqrt(1/d)])
+# Matrix is transposed!
+with open('python_starting_weights.bin', 'wb') as outfile:
+    feat_size = features.size()[1]
+    classification_size = labels.max().item()+1
+    for i in range(classification_size):
+        for j in range(feat_size):
+            outfile.write(bytearray(struct.pack("f",list(model.parameters())[0][i][j].detach().numpy())))
 
+
+# https://deepnotes.io/softmax-crossentropy
 def train_regression(model,
                      train_features, train_labels,
                      val_features, val_labels,
@@ -78,8 +98,18 @@ def train_regression(model,
     for epoch in range(epochs):
         model.train()
         optimizer.zero_grad()
+        # Inference / passe-avant => NxC
         output = model(train_features)
+        # if epoch == 0:
+            # print("TRAIN FEAT SIZE: ", train_features.size())
+            # print("OUTPUT SIZE: ", output.size())
+            # print("OUTPUT: ", output)
+            # print("WEIGHTS: ", list(model.parameters()))
+        # softmax + Loss function => SCALAR !?
         loss_train = F.cross_entropy(output, train_labels)
+        # if epoch == 0:
+            # print("LOSS TRAIN SIZE: ", loss_train.size())
+        # print("LOSS TRAIN: ", loss_train)
         loss_train.backward()
         optimizer.step()
     train_time = perf_counter()-t
