@@ -35,7 +35,7 @@ print("ADJ size: ", adj.to_dense().size())
 print("features: ", features.size())
 print("labels: ", labels.size())
 #print("idx_train: ", idx_train)
-#print("idx_val: ", idx_val)
+# print("idx_val: ", idx_val)
 #print("idx_test: ", idx_test)
 #with open('adj.json', 'w') as outfile:
 #    json.dump(adj.to_dense().numpy().tolist(), outfile)
@@ -58,6 +58,12 @@ model = get_model(args.model, features.size(1), labels.max().item()+1, args.hidd
 
 # print(features)
 
+# # print labels matrix
+# with open('labels.bin', 'wb') as outfile:
+#     graph_size = labels.size()[0]
+#     for i in range(graph_size):
+#         outfile.write(bytearray(struct.pack("I",labels[i].numpy())))
+
 new_features = torch.empty_like(features)
 #new_features, precomp2 = ssgc_precompute(features, adj, args.degree)
 if args.model == "SGC": features, precompute_time = sgc_precompute(features, adj, args.degree)
@@ -76,16 +82,24 @@ print("{:.4f}s".format(precompute_time))
 #print(torch.all(torch.eq(new_features, features)))
 
 # print starting weights (aiming distribution [-sqrt(1/d), sqrt(1/d)])
-# Matrix is transposed!
-with open('python_starting_weights.bin', 'wb') as outfile:
-    feat_size = features.size()[1]
+
+# with open('python_starting_weights.bin', 'wb') as outfile:
+#     feat_size = features.size()[1]
+#     classification_size = labels.max().item()+1
+#     for i in range(classification_size):
+#         for j in range(feat_size):
+#             outfile.write(bytearray(struct.pack("f",list(model.parameters())[0][i][j].detach().numpy())))
+
+
+# print starting biases
+
+with open('python_starting_biases.bin', 'wb') as outfile:
     classification_size = labels.max().item()+1
     for i in range(classification_size):
-        for j in range(feat_size):
-            outfile.write(bytearray(struct.pack("f",list(model.parameters())[0][i][j].detach().numpy())))
-
+        outfile.write(bytearray(struct.pack("f",list(model.parameters())[1][i].detach().numpy())))
 
 # https://deepnotes.io/softmax-crossentropy
+# https://eli.thegreenplace.net/2018/backpropagation-through-a-fully-connected-layer/
 def train_regression(model,
                      train_features, train_labels,
                      val_features, val_labels,
@@ -101,22 +115,29 @@ def train_regression(model,
         # Inference / passe-avant => NxC
         output = model(train_features)
         # if epoch == 0:
-            # print("TRAIN FEAT SIZE: ", train_features.size())
+        #     print("INFERED:", output)
+
+        # if epoch == 0:
+        #     print("TRAIN FEAT SIZE: ", train_features[0])
             # print("OUTPUT SIZE: ", output.size())
-            # print("OUTPUT: ", output)
-            # print("WEIGHTS: ", list(model.parameters()))
+            # print("OUTPUT: ", output[0])
+            # print("WEIGHTS: ", list(model.parameters())[0][0])
         # softmax + Loss function => SCALAR !?
         loss_train = F.cross_entropy(output, train_labels)
         # if epoch == 0:
             # print("LOSS TRAIN SIZE: ", loss_train.size())
-        # print("LOSS TRAIN: ", loss_train)
+        if epoch == 0 or epoch == epochs -1:
+            print("LOSS TRAIN: ", loss_train)
         loss_train.backward()
+        if epoch == 0:
+            print (optimizer.state_dict())
         optimizer.step()
     train_time = perf_counter()-t
 
     with torch.no_grad():
         model.eval()
         output = model(val_features)
+        # print("VAL_LABELS:", output)
         acc_val = accuracy(output, val_labels)
 
     return model, acc_val, train_time
@@ -127,6 +148,7 @@ def test_regression(model, test_features, test_labels):
 
 
 if args.model == "SGC":
+    print("start BIASES", list(model.parameters())[1])
     model, acc_val, train_time = train_regression(model, features[idx_train], labels[idx_train], features[idx_val], labels[idx_val],
                      args.epochs, args.weight_decay, args.lr, args.dropout)
     acc_test = test_regression(model, features[idx_test], labels[idx_test])
@@ -138,7 +160,7 @@ if args.model == "SGC":
     print("model test res: " , model(features[idx_test]).size())
     #print("DIFF: ", torch.eq(test_res, model(features[idx_test])))
 
-    print(list(model.parameters())[1])
+    print("end BIASES", list(model.parameters())[1])
     for param in model.parameters():
         print(type(param.data), param.size())
 
