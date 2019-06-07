@@ -9,6 +9,19 @@
 #define FEATURE_DEPTH 1433
 #define LABELS 7
 #define DEGREE 2
+#define ALPHA 0.2
+#define BETA1 0.9
+#define BETA2 0.999
+#define EPSILON 0.00000001
+#define WEIGHT_DECAY 0.000005
+#define EPOCHS 100
+
+#define TRAIN_START 0
+#define TRAIN_END 139
+#define VAL_START 140
+#define VAL_END 639
+#define TEST_START 1708
+#define TEST_END 2707
 
 typedef union Data_union {
     uint32_t u;
@@ -207,6 +220,83 @@ float cross_entropy (float* vector, uint32_t* labels) {
     return cross_entropy / (TRAIN_END - TRAIN_START +1);
 }
 
+// gradients [LABELS][FEATURE_DEPTH]
+void gradients (float* features, float* infered_res, uint32_t* labels, float* grad, float* bias_grad){
+    for (uint32_t i = 0; i < LABELS; i++) {
+        for (uint32_t j = 0; j < FEATURE_DEPTH; j++) {
+            float sum_grad = 0, sum_bias = 0;
+            for (uint32_t b = TRAIN_START; b <= TRAIN_END; b++) {
+                if (labels[b] == i) {
+                    sum_grad += (infered_res[b*LABELS + i] - 1) * features[b*FEATURE_DEPTH + j];
+                    if (!j) // Do not iterate over features
+                        sum_bias += infered_res[b*LABELS + i] - 1;
+                } else {
+                    sum_grad += infered_res[b*LABELS + i] * features[b*FEATURE_DEPTH + j]; 
+                    if (!j)
+                        sum_bias += infered_res[b*LABELS + i]; 
+                }
+            }
+            grad[i*FEATURE_DEPTH + j] = sum_grad;
+            if (!j)
+                bias_grad[i] = sum_bias;
+        }
+    }
+
+}
+
+// TODO implement gradient decay and biases
+void adam (float* grad, float* m, float* v, float* weights, uint32_t t) {
+    uint32_t i = 0;
+    for (i = 0; i < LABELS*FEATURE_DEPTH; i++) {
+        /* grad[i] += WEIGHT_DECAY * weights[i]; // L2 linearization. Doesn't seem to work */
+        m[i] = BETA1 * m[i] + (1 - BETA1) * grad[i];
+        v[i] = BETA2 * v[i] + (1 - BETA2) * pow(grad[i], 2.0);
+    }
+    float* m_ = malloc(LABELS*FEATURE_DEPTH*sizeof(float));
+    float* v_ = malloc(LABELS*FEATURE_DEPTH*sizeof(float));
+    for (i = 0; i < LABELS*FEATURE_DEPTH; i++) {
+        m_[i] = m[i] / (1- pow(BETA1, t));
+        v_[i] = v[i] / (1- pow(BETA2, t));
+        weights[i] -= (ALPHA * m_[i] / (sqrt(v_[i]) + EPSILON));
+    }
+}
+
+// Note: This function could be removed by extending the weight matrix by LABELS
+//       to include biases. Adam optimization would then be automatic, but gradient
+//       calculation and inference would need to be modified accordingly
+void adam_biases (float* grad_b, float* m_b, float* v_b, float* biases, uint32_t t) {
+    uint32_t i = 0;
+    for (i = 0; i < LABELS; i++) {
+        /* biases[i] += WEIGHT_DECAY * weights[i]; // L2 linearization. Doesn't seem to work */
+        m_b[i] = BETA1 * m_b[i] + (1 - BETA1) * grad_b[i];
+        v_b[i] = BETA2 * v_b[i] + (1 - BETA2) * pow(grad_b[i], 2.0);
+    }
+    float* m_b_ = malloc(LABELS*sizeof(float));
+    float* v_b_ = malloc(LABELS*sizeof(float));
+    for (i = 0; i < LABELS; i++) {
+        m_b_[i] = m_b[i] / (1- pow(BETA1, t));
+        v_b_[i] = v_b[i] / (1- pow(BETA2, t));
+        biases[i] -= (ALPHA * m_b_[i] / (sqrt(v_b_[i]) + EPSILON));
+    }
+}
+
+// prediction[GRAPH_SIZE][LABELS]  truth[GRAPH_SIZE]
+float accuracy (float* prediction, uint32_t* truth, uint32_t start_idx, uint32_t stop_idx) {
+    uint32_t i, j, max_idx, sum = 0;
+    float max;
+    for (i = start_idx; i <= stop_idx; i++ ) {
+        max = 0;
+        for (j = 0; j < LABELS; j++) {
+            if (prediction[i * LABELS + j] > max) {
+                max = prediction[i * LABELS + j];
+                max_idx = j;
+            }
+        }
+        if (max_idx == truth[i])
+            sum ++;
+    }
+    return ((float)sum / (stop_idx - start_idx + 1));
+}
 
 int main() {
     clock_t begin = clock();
@@ -234,14 +324,61 @@ int main() {
     float * biases = read_float_file("python_starting_biases.bin");
     float * infered_res = calloc(LABELS * GRAPH_SIZE, sizeof(float));
     // TODO create randomised training sub-goup
-    for (uint32_t i = 0; i < GRAPH_SIZE; i++) {
-        infer(features, weights, infered_res, i);
+    float * grad = calloc(LABELS * FEATURE_DEPTH, sizeof(float));
+    float * bias_grad = calloc(LABELS, sizeof(float));
+    float * m = calloc(LABELS * FEATURE_DEPTH, sizeof(float));
+    float * v = calloc(LABELS * FEATURE_DEPTH, sizeof(float));
+    float * m_b = calloc(LABELS, sizeof(float));
+    float * v_b = calloc(LABELS, sizeof(float));
+    /* for (uint32_t i = 0; i < 30; i++) { */
+    /*     printf("row %2d", i); */
+    /*     for (uint32_t j = 0; j < LABELS; j++) { */
+    /*         printf(" %f ", infered_res[LABELS*i + j]); */
+    /*     } */
+    /*     printf("\n"); */
+    /* } */
+
+    printf("starting biases: ");
+    for (uint32_t i = 0; i < LABELS; i++){
+        printf("%f ", biases[i]);
     }
+    printf("\n");
+
+    for (uint32_t epoch = 1; epoch < EPOCHS+1; epoch++) {
+        for (uint32_t i = TRAIN_START; i <= TRAIN_END; i++) {
+            infer(features, weights, biases, infered_res, i);
+            soft_max(infered_res, i);
+        }
+        /* printf("infered20: %f weight20 : %f\n", infered_res[20], weights[20]); */
+        if (epoch == 1 || epoch == EPOCHS)
+            printf("Cross entropy %d: %f \n", epoch, cross_entropy(infered_res, labels));
+        gradients (features, infered_res, labels, grad, bias_grad);
+        adam(grad, m, v, weights, epoch);
+        adam_biases(bias_grad, m_b, v_b, biases, epoch);
+    }
+
+
+    for (uint32_t i = VAL_START; i <= VAL_END; i++) {
+        infer(features, weights, biases, infered_res, i);
+        soft_max(infered_res, i);
+    }
+    printf("Validation ACCURACY: %f\n", accuracy(infered_res, labels, VAL_START, VAL_END));
+
+    for (uint32_t i = TEST_START; i <= TEST_END; i++) {
+        infer(features, weights, biases, infered_res, i);
+        soft_max(infered_res, i);
+    }
+    printf("Test ACCURACY: %f\n", accuracy(infered_res, labels, TEST_START, TEST_END));
 
     end = clock();
     time_spent = (double)(end - begin) / CLOCKS_PER_SEC;
     printf("Inference time: %lf\n", time_spent);
 
+    printf("ending biases: ");
+    for (uint32_t i = 0; i < LABELS; i++){
+        printf("%f ", biases[i]);
+    }
+    printf("\n");
 
     free(adj);
     free(degree);
