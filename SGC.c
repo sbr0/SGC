@@ -164,31 +164,47 @@ float * sparse_matrix_mult(dataUnion * s, float * features) {
 }
 
 // calculates inference for a given node 
-void infer (float* features, float* weights, float* infered_res, uint32_t n) {
+void infer (float* features, float* weights, float* biases, float* infered_res, uint32_t n) {
     uint32_t i, j;
     for (i = 0; i < LABELS; i++) {
-        infered_res[n] = 0;
+        infered_res[n*LABELS + i] = biases[i];
         for (j = 0; j < FEATURE_DEPTH; j++) {
             infered_res[n*LABELS + i] += features[n*FEATURE_DEPTH + j] * weights[i*FEATURE_DEPTH + j];
+            /* if (n == 0 && i == 0 && j < 50) */
+            /*     printf("starting feat %d: %f\n", j, features[j]); */
         }
+            /* if (n==0) printf("infered %d:%d: %f\n", n, i, infered_res[n*LABELS + i]); */
     }
 }
 
-void soft_max (float* matrix, uint32_t n) {
+void soft_max (float* vector, uint32_t n) {
     float max = 0, sum = 0;
     uint32_t i;
     for (i = 0; i < LABELS; i++) {
-        float temp = matrix[n*LABELS + i];
+        float temp = vector[n*LABELS + i];
         if (temp > max)
             max = temp;
     }
     for (i = 0; i < LABELS; i++) {
-        matrix[n*LABELS + i] -= max;
-        sum += matrix[n*LABELS + i];
+        vector[n*LABELS + i] -= max;
+        sum += exp(vector[n*LABELS + i]);
     }
     for (i = 0; i < LABELS; i++) {
-        matrix[n*LABELS + i] /= sum;
+        vector[n*LABELS + i] = exp(vector[n*LABELS + i]) / sum;
+        /* printf("%d : %f\n", i, vector[n*LABELS + i]); */
     }
+}
+
+float cross_entropy (float* vector, uint32_t* labels) {
+    // cross_entropy = - 1 * log(vector(x)) ; with x the correct label
+    float cross_entropy = 0; 
+    uint32_t i;
+    for (i = TRAIN_START; i <= TRAIN_END; i++) {
+        /* printf("label: %d vector@label: %f\n", labels[i], vector[i*LABELS + labels[i]]); */
+        cross_entropy -= log(vector[i*LABELS + labels[i]]);
+        /* printf("%f\n", cross_entropy);//log(vector[i*LABELS + labels[i]])); */
+    }
+    return cross_entropy / (TRAIN_END - TRAIN_START +1);
 }
 
 
@@ -198,6 +214,7 @@ int main() {
     uint32_t * adj = read_file("adj.bin");
     float * adj_weights = read_float_file("adj_weights.bin"); // Should actually be dataUnion type
     float * features = read_float_file("features.bin");
+    uint32_t * labels = read_file("labels.bin");
     float * degree = generate_degree_matrix(adj);
     dataUnion * s = generate_normalised_adj_matrix(adj, adj_weights, degree);
     for (uint32_t i = 0; i < DEGREE; i++) {
@@ -213,7 +230,9 @@ int main() {
     begin = clock();
     // Weights are transposed from python: LABELS x FEATURE_DEPTH
     float * weights = read_float_file("python_starting_weights.bin"); // transposed
-    float * infered_res = malloc(LABELS * GRAPH_SIZE * sizeof(float));
+    printf("ALIVE\n");
+    float * biases = read_float_file("python_starting_biases.bin");
+    float * infered_res = calloc(LABELS * GRAPH_SIZE, sizeof(float));
     // TODO create randomised training sub-goup
     for (uint32_t i = 0; i < GRAPH_SIZE; i++) {
         infer(features, weights, infered_res, i);
