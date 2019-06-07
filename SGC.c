@@ -15,50 +15,6 @@ typedef union Data_union {
     float f;
 } dataUnion;
 
-/* void copy_matrix(uint32_t dim1, uint32_t dim2, float src[dim1*dim2], float dest[dim1][dim2]) { */
-/*     uint32_t i, j; */
-/*     for(i = 0; i < dim1; i++) { */
-/*         for(j = 0; j < dim2; j++) { */
-/*             dest[i][j] = src[i*dim2 + j]; */
-/*         } */
-/*     } */
-/* } */
-
-/* void print_matrix_to_file(char* filename, uint32_t dim1, uint32_t dim2, float matrix[dim1][dim2]) { */
-/*     uint32_t i, j; */
-/*     FILE *f = fopen(filename, "wb"); */
-/*     if (f == NULL) { */
-/*         printf("Error opening file!\n"); */
-/*         exit(1); */
-/*     } */
-/*     for(i = 0; i < dim1; i++) { */
-/*         for(j = 0; j < dim2; j++) { */
-/*             fwrite(&matrix[i][j], sizeof(float), 1, f); */
-/*         } */
-/*     } */
-/*     fclose(f); */
-/* } */
-
-
-/* void full_matrix_mult () { */
-/*     float *new_features = malloc(GRAPH_SIZE*FEATURE_DEPTH*sizeof(float)); */
-/*     uint16_t d; */
-/*     uint32_t i, j, k; */
-/*     for(d = 0; d < DEGREE; d++){ */
-/*         printf("Degree: %d\n", d); */
-/*         for(i = 0; i < GRAPH_SIZE; i++) { */
-/*             for(j = 0; j < FEATURE_DEPTH; j++) { */
-/*                 new_features[i*FEATURE_DEPTH +j] = 0; */
-/*                 for(k = 0; k < GRAPH_SIZE; k++) { */
-/*                     new_features[i*FEATURE_DEPTH + j] += ADJ[i][k] * FEAT[k][j]; */
-/*                 } */
-/*             } */
-/*         } */
-/*         copy_matrix((uint32_t)GRAPH_SIZE, (uint32_t)FEATURE_DEPTH, new_features, FEAT); */
-/*     } */
-/*     free(new_features); */
-/* } */
-
 // mem_file must be freed by caller
 uint32_t* read_file(char* filename) {
     FILE *f;
@@ -79,6 +35,9 @@ float* read_float_file(char* filename) {
     FILE *f;
     uint32_t file_size;
     f = fopen(filename, "rb");
+    if (f == NULL) {
+        fprintf(stderr, "file %s could not be opended, aborting\n", filename);
+    }
     fseek(f, 0L, SEEK_END);
     file_size = ftell(f);
     rewind(f);
@@ -244,8 +203,6 @@ int main() {
     for (uint32_t i = 0; i < DEGREE; i++) {
         features = sparse_matrix_mult(s, features);
     }
-
-    /* full_matrix_mult(); */
 
     clock_t end = clock();
     double time_spent = (double)(end - begin) / CLOCKS_PER_SEC;
