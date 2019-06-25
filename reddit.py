@@ -19,8 +19,10 @@ parser.add_argument('--test', action='store_true', default=False,
 parser.add_argument('--seed', type=int, default=42, help='Random seed.')
 parser.add_argument('--epochs', type=int, default=2,
                     help='Number of epochs to train.')
-parser.add_argument('--weight_decay', type=float, default=0,
+parser.add_argument('--weight_decay', type=float, default=5e-6,
                     help='Weight decay (L2 loss on parameters).')
+parser.add_argument('--lr', type=float, default=0.2,
+                    help='learning rate')
 parser.add_argument('--normalization', type=str, default='AugNormAdj',
                    choices=['NormLap', 'Lap', 'RWalkLap', 'FirstOrderGCN',
                             'AugNormAdj', 'NormAdj', 'RWalk', 'AugRWalk', 'NoNorm'],
@@ -35,7 +37,7 @@ args.cuda = not args.no_cuda and torch.cuda.is_available()
 
 set_seed(args.seed, args.cuda)
 
-adj, train_adj, features, labels, idx_train, idx_val, idx_test = load_reddit_data(args.normalization)
+adj, train_adj, features, labels, idx_train, idx_val, idx_test = load_reddit_data(args.normalization, cuda=args.cuda)
 print("Finished data loading.")
 
 model = SGC(features.size(1), labels.max().item()+1)
@@ -49,7 +51,8 @@ else:
 test_features = processed_features[idx_test if args.test else idx_val]
 
 def train_regression(model, train_features, train_labels, epochs):
-    optimizer = optim.LBFGS(model.parameters(), lr=1)
+#    optimizer = optim.LBFGS(model.parameters(), lr=1)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     model.train()
     def closure():
         optimizer.zero_grad()
