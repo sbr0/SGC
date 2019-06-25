@@ -9,12 +9,14 @@ class SGC(nn.Module):
     A Simple PyTorch Implementation of Logistic Regression.
     Assuming the features have been preprocessed with k-step graph propagation.
     """
-    def __init__(self, nfeat, nclass):
+    def __init__(self, nfeat, nclass, dropout):
         super(SGC, self).__init__()
 
+        self.dropout = nn.Dropout(dropout)
         self.W = nn.Linear(nfeat, nclass)
 
     def forward(self, x):
+        x = self.dropout(x)
         return self.W(x)
 
 class GraphConvolution(Module):
@@ -64,7 +66,8 @@ def get_model(model_opt, nfeat, nclass, nhid=0, dropout=0, cuda=True):
                     dropout=dropout)
     elif model_opt == "SGC":
         model = SGC(nfeat=nfeat,
-                    nclass=nclass)
+                    nclass=nclass,
+                    dropout=dropout)
     else:
         raise NotImplementedError('model:{} is not implemented!'.format(model_opt))
 

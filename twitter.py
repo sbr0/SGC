@@ -14,7 +14,7 @@ import json
 import struct
 
 import scipy as sp
-# import cPickle
+# import cPickle # no need to specify cpickle in python 3, pickle is sufficient
 import gzip
 
 # Arguments
@@ -38,6 +38,7 @@ def load_obj(filename, serializer=pkl):
         obj = serializer.load(fin, encoding='latin1')
     return obj
 
+# data = load_obj('twitter_us.pkl')
 data = load_obj('geotext.pkl')
 
 adj, X_train, Y_train, X_dev, Y_dev, X_test, Y_test, U_train, U_dev, U_test, classLatMedian, classLonMedian, userLocation = data
@@ -64,18 +65,18 @@ idx_train = torch.LongTensor(idx_train)
 idx_val = torch.LongTensor(idx_val)
 idx_test = torch.LongTensor(idx_test)
 
-print("ADJ: ", adj)
-print("features: ", features)
-print("labels: ", labels)
+# print("ADJ: ", adj)
+# print("features: ", features)
+# print("labels: ", labels)
 
 torch.set_printoptions(threshold=100000)
 # print("ADJ: ", sum(adj.to_dense()[1]))
 # print("ADJ size: ", adj.to_dense().size())
 # print("features: ", features.size())
-print("labels: ", labels.size())
+# print("labels: ", labels.size())
 # print("idx_train: ", idx_train)
 # print("idx_val: ", idx_val)
-#print("idx_test: ", idx_test)
+# print("idx_test: ", idx_test)
 #with open('adj.json', 'w') as outfile:
 #    json.dump(adj.to_dense().numpy().tolist(), outfile)
 
@@ -121,7 +122,7 @@ model = get_model(args.model, features.size(1), labels.max().item()+1, args.hidd
 
 new_features = torch.empty_like(features)
 #new_features, precomp2 = ssgc_precompute(features, adj, args.degree)
-if args.model == "SGC": features, precompute_time = sgc_precompute(features, adj, args.degree)
+if args.model == "SGC": features, precompute_time = sgc_precompute(features, adj, 3)
 print("{:.4f}s".format(precompute_time))
 
 # print(features)
@@ -181,11 +182,11 @@ def train_regression(model,
         loss_train = F.cross_entropy(output, train_labels)
         # if epoch == 0:
             # print("LOSS TRAIN SIZE: ", loss_train.size())
-        if epoch == 0 or epoch == epochs -1:
-            print("LOSS TRAIN: ", loss_train)
+        # if epoch == 0 or epoch == epochs -1:
+            # print("LOSS TRAIN: ", loss_train)
         loss_train.backward()
-        if epoch == 0:
-            print (optimizer.state_dict())
+        # if epoch == 0:
+            # print (optimizer.state_dict())
         optimizer.step()
     train_time = perf_counter()-t
 
@@ -211,13 +212,50 @@ if args.model == "SGC":
 
 
     test_res = torch.mm(features[idx_test], torch.transpose(model.W.weight.data, 0, 1))
-    print("DIY test res", test_res.size())
-    print("model test res: " , model(features[idx_test]).size())
+    # print("DIY test res", test_res.size())
+    # print("model test res: " , model(features[idx_test]).size())
     #print("DIFF: ", torch.eq(test_res, model(features[idx_test])))
 
-    print("end BIASES", list(model.parameters())[1])
-    for param in model.parameters():
-        print(type(param.data), param.size())
+    # print("end BIASES", list(model.parameters())[1])
+    # for param in model.parameters():
+        # print(type(param.data), param.size())
 
-print("Validation Accuracy: {:.4f} Test Accuracy: {:.4f}".format(acc_val, acc_test))
+from haversine import haversine
+import logging
+def geo_eval(y_true, y_pred, U_eval, classLatMedian, classLonMedian, userLocation):
+    assert len(y_pred) == len(U_eval), "#preds: %d, #users: %d" %(len(y_pred), len(U_eval))
+    distances = []
+    latlon_pred = []
+    latlon_true = []
+    # print("LENGTH OF Y_PRED: ", len(y_pred))
+    # print("USER 0 : ", U_eval[0])
+    # print("LOCATION: ", userLocation[U_eval[0]].split(','))
+    # print("PREDIC: ", str(y_pred[0]))
+    # print("LAT, LON :", classLatMedian[str(54)], classLonMedian[str(54)])
+    for i in range(0, len(y_pred)):
+        user = U_eval[i]
+        location = userLocation[user].split(',')
+        lat, lon = float(location[0]), float(location[1])
+        latlon_true.append([lat, lon])
+        prediction = str(y_pred[i])
+        lat_pred, lon_pred = classLatMedian[prediction], classLonMedian[prediction]
+        latlon_pred.append([lat_pred, lon_pred])
+        distance = haversine((lat, lon), (lat_pred, lon_pred))
+        distances.append(distance)
+
+        acc_at_161 = 100 * len([d for d in distances if d < 161]) / float(len(distances))
+
+        logging.info( "Mean: " + str(int(np.mean(distances))) + " Median: " + str(int(np.median(distances))) + " Acc@161: " + str(int(acc_at_161)) )
+
+    return np.mean(distances), np.median(distances), acc_at_161, distances, latlon_true, latlon_pred
+
+# adj, X_train, Y_train, X_dev, Y_dev, X_test, Y_test, U_train, U_dev, U_test, classLatMedian, classLonMedian, userLocation = data
+# print(Y_test.size)
+test_res = torch.argmax(test_res, dim=1).numpy()
+test_truth = labels[idx_test].numpy()
+
+mean, median, acc, _, _, _ = geo_eval(test_truth, test_res, U_test, classLatMedian, classLonMedian, userLocation)
+print("161 acc: ", acc, mean, median)
+
+# print("Validation Accuracy: {:.4f} Test Accuracy: {:.4f}".format(acc_val, acc_test))
 print("Pre-compute time: {:.4f}s, train time: {:.4f}s, total: {:.4f}s".format(precompute_time, train_time, precompute_time+train_time))
