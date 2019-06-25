@@ -30,11 +30,11 @@ set_seed(args.seed, args.cuda)
 adj, features, labels, idx_train, idx_val, idx_test = load_citation(args.dataset, args.normalization, args.cuda)
 
 torch.set_printoptions(threshold=100000)
-print("ADJ: ", sum(adj.to_dense()[1]))
-print("ADJ size: ", adj.to_dense().size())
-print("features: ", features.size())
-print("labels: ", labels.size())
-#print("idx_train: ", idx_train)
+# print("ADJ: ", adj)
+# print("ADJ size: ", adj.to_dense().size())
+# print("features: ", features)
+# print("labels: ", labels)
+print("idx_train: ", idx_train)
 # print("idx_val: ", idx_val)
 #print("idx_test: ", idx_test)
 #with open('adj.json', 'w') as outfile:
@@ -55,6 +55,22 @@ model = get_model(args.model, features.size(1), labels.max().item()+1, args.hidd
 #     for i in range(graph_size):
 #         for j in range(feat_size):
 #             outfile.write(bytearray(struct.pack("f",features[i][j].numpy())))
+
+# # Compressed sparse row (CSR) format
+# with open('CSR_values.bin', 'wb') as V, \
+#         open('CSR_Idx.bin', 'wb') as Idx, \
+#         open('CSR_Ptr.bin', 'wb') as Ptr:
+#     graph_size = features.size()[0]
+#     feat_size = features.size()[1]
+#     k = 0
+#     for i in range(graph_size):
+#         Ptr.write(bytearray(struct.pack("I", k)))
+#         for j in range(feat_size):
+#             if (features[i][j] != 0):
+#                 V.write(bytearray(struct.pack("f",features[i][j].numpy())))
+#                 Idx.write(bytearray(struct.pack("I", j)))
+#                 k = k + 1
+
 
 # print(features)
 

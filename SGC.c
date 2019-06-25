@@ -8,12 +8,13 @@
 #define GRAPH_SIZE 2708
 #define FEATURE_DEPTH 1433
 #define LABELS 7
-#define DEGREE 2
+#define DEGREE 1
 #define ALPHA 0.2
 #define BETA1 0.9
 #define BETA2 0.999
 #define EPSILON 0.00000001
-#define WEIGHT_DECAY 0.000005
+#define WEIGHT_DECAY 5e-2
+/* #define WEIGHT_DECAY 0.001 */
 #define EPOCHS 100
 
 #define TRAIN_START 0
@@ -27,6 +28,13 @@ typedef union Data_union {
     uint32_t u;
     float f;
 } dataUnion;
+
+struct CSR {
+    float * val;
+    uint32_t * idx;
+    uint32_t val_length;
+    uint32_t * ptr;
+} CSR;
 
 // mem_file must be freed by caller
 uint32_t* read_file(char* filename) {
@@ -60,6 +68,48 @@ float* read_float_file(char* filename) {
     
     return mem_file;
 } 
+
+struct CSR read_CSR(char* filename_val, char* filename_idx, char* filename_ptr) {
+    FILE *f;
+    uint32_t file_size;
+    struct CSR new_CSR;
+
+    f = fopen(filename_val, "rb");
+    if (f == NULL) {
+        fprintf(stderr, "file %s could not be opended, aborting\n", filename_val);
+    }
+    fseek(f, 0L, SEEK_END);
+    file_size = ftell(f);
+    rewind(f);
+    new_CSR.val = malloc(file_size);
+    fread(new_CSR.val, 1, file_size, f);
+    new_CSR.val_length = file_size / sizeof(float);
+    fclose(f);
+
+    f = fopen(filename_idx, "rb");
+    if (f == NULL) {
+        fprintf(stderr, "file %s could not be opended, aborting\n", filename_idx);
+    }
+    fseek(f, 0L, SEEK_END);
+    file_size = ftell(f);
+    rewind(f);
+    new_CSR.idx = malloc(file_size);
+    fread(new_CSR.idx, 1, file_size, f);
+    fclose(f);
+
+    f = fopen(filename_ptr, "rb");
+    if (f == NULL) {
+        fprintf(stderr, "file %s could not be opended, aborting\n", filename_ptr);
+    }
+    fseek(f, 0L, SEEK_END);
+    file_size = ftell(f);
+    rewind(f);
+    new_CSR.ptr = malloc(file_size);
+    fread(new_CSR.ptr, 1, file_size, f);
+    fclose(f);
+    
+    return new_CSR;
+}
 
 float* generate_degree_matrix(uint32_t* adj) {
     uint32_t i = 0;
@@ -96,8 +146,6 @@ void* generate_normalised_adj_matrix (uint32_t* adj, float* adj_weights, float* 
     float weight;
     bool self_loop;
     s[j++].u = nb_nodes; 
-    printf("nb_nodes = %zu\n", nb_nodes);
-    printf("s_capacity: %zu\n", s_capacity);
     while (base_node < nb_nodes) {
         self_loop = false;
         neighbor_nb = adj[i++];
@@ -176,6 +224,106 @@ float * sparse_matrix_mult(dataUnion * s, float * features) {
     return new_features;
 }
 
+struct CSR sparse_matrix_mult_CSR(dataUnion * s, struct CSR features) {
+    uint32_t i = 0, base_node = 0, dest_node = 0, neighbor_nb;
+    uint32_t nb_nodes = s[i++].u;  
+    float adj_weight;
+    struct CSR new_features;
+    size_t nf_size = 1000 * sizeof(float); // Warning: float and uint32_t must be same size
+    new_features.val = malloc(nf_size); 
+    new_features.idx = malloc(nf_size); 
+    new_features.ptr = malloc(GRAPH_SIZE * sizeof(uint32_t)); 
+    uint32_t nf_count = 0;
+    FILE *f2 = fopen("c_precomp_CSR2.bin", "wb");
+    if (f2 == NULL) {
+        printf("Error opening file!\n");
+        exit(1);
+    }
+    while (base_node < nb_nodes) {
+        /* printf("ALIVE %d i: %d nf_count: %d\n", base_node, i, nf_count); */
+        float* CSR_dense_row = calloc(FEATURE_DEPTH, sizeof(float));
+        
+        neighbor_nb = s[i++].u;
+        for (uint32_t k = 0; k < neighbor_nb; k++) {
+            uint32_t m, next_row, row_start;
+            dest_node = s[i++].u;
+            adj_weight = s[i++].f;
+            // apply weight to all relevant features (Weight stationary)
+            row_start = features.ptr[dest_node];
+            if (dest_node < GRAPH_SIZE - 1) {
+                next_row = features.ptr[dest_node + 1];
+            } else {
+                next_row = features.val_length;
+                printf("next_row = %d idx: %lu 0: %lu \n", next_row, sizeof(features.idx), sizeof(features.idx[0]));
+            }
+            m = next_row - row_start;
+            for (uint32_t j = 0; j < m; j++) {
+                CSR_dense_row[features.idx[row_start + j]] += adj_weight * features.val[row_start + j]; 
+                /* new_features[base_node*FEATURE_DEPTH + j] += adj_weight * features[dest_node*FEATURE_DEPTH + j]; */
+            }
+        }
+        /* printf("ALIVE %d i: %d nf_count: %d\n", base_node, i, nf_count); */
+        // Dense row is now complete, convert to CSR format.
+        new_features.ptr[base_node] = nf_count;
+        for (uint32_t j = 0; j < FEATURE_DEPTH; j++) {
+            fwrite(&CSR_dense_row[j], sizeof(float), 1, f2);
+            if (CSR_dense_row[j] != 0) {
+                new_features.val[nf_count] = CSR_dense_row[j];
+                new_features.idx[nf_count] = j;
+                nf_count ++;
+            }
+            if (nf_count == nf_size / sizeof(uint32_t)) {
+                nf_size *= 2;
+                new_features.val = realloc(new_features.val, nf_size);
+                new_features.idx = realloc(new_features.idx, nf_size);
+            }
+        }
+        free(CSR_dense_row);
+        base_node++;
+    }
+    fclose(f2);
+
+    new_features.val = realloc(new_features.val, nf_count * sizeof(float));
+    new_features.idx = realloc(new_features.idx, nf_count * sizeof(float));
+    new_features.val_length = nf_count;
+
+    // Print result to file
+    // Converts back to dense format for a 1 to 1 comparison
+    FILE *f = fopen("c_precomp_CSR.bin", "wb");
+    if (f == NULL) {
+        printf("Error opening file!\n");
+        exit(1);
+    }
+    for(i = 0; i < GRAPH_SIZE; i++) {
+        uint32_t nb_nodes, nf_pos;
+        float zero = 0.0;
+        nf_pos = new_features.ptr[i];
+        if ( i < GRAPH_SIZE - 1 ) {
+            nb_nodes = new_features.ptr[i+1] - nf_pos;
+        } else {
+            nb_nodes = nf_count - nf_pos;
+        }
+        // TODO fix difference btw printed and real
+        printf("nbNodes : %d\n", nb_nodes);
+        for (uint32_t j = 0; j < FEATURE_DEPTH; j++) {
+            if (j == new_features.idx[nf_pos]) {
+                fwrite(&new_features.val[nf_pos], sizeof(float), 1, f);
+                printf("X\n");
+                if (nf_pos - nb_nodes < new_features.ptr[i]) {
+                    nf_pos++;
+                }
+            } else {
+                fwrite(&zero, sizeof(float), 1, f);
+            } 
+        }
+    }
+    fclose(f);
+    free(features.ptr);
+    free(features.val);
+    free(features.idx);
+    return new_features;
+}
+
 // calculates inference for a given node 
 void infer (float* features, float* weights, float* biases, float* infered_res, uint32_t n) {
     uint32_t i, j;
@@ -221,7 +369,7 @@ float cross_entropy (float* vector, uint32_t* labels) {
 }
 
 // gradients [LABELS][FEATURE_DEPTH]
-void gradients (float* features, float* infered_res, uint32_t* labels, float* grad, float* bias_grad){
+void gradients (float* features, float* weights, float* biases, float* infered_res, uint32_t* labels, float* grad, float* bias_grad){
     for (uint32_t i = 0; i < LABELS; i++) {
         for (uint32_t j = 0; j < FEATURE_DEPTH; j++) {
             float sum_grad = 0, sum_bias = 0;
@@ -236,19 +384,20 @@ void gradients (float* features, float* infered_res, uint32_t* labels, float* gr
                         sum_bias += infered_res[b*LABELS + i]; 
                 }
             }
-            grad[i*FEATURE_DEPTH + j] = sum_grad;
+            grad[i*FEATURE_DEPTH + j] = sum_grad + WEIGHT_DECAY * weights[i*FEATURE_DEPTH + j];
             if (!j)
-                bias_grad[i] = sum_bias;
+                bias_grad[i] = sum_bias + WEIGHT_DECAY * biases[i];
         }
     }
 
 }
 
-// TODO implement gradient decay and biases
+// TODO implement gradient decay(L2)
 void adam (float* grad, float* m, float* v, float* weights, uint32_t t) {
     uint32_t i = 0;
+    float weight_sum = 0;
     for (i = 0; i < LABELS*FEATURE_DEPTH; i++) {
-        /* grad[i] += WEIGHT_DECAY * weights[i]; // L2 linearization. Doesn't seem to work */
+        /* grad[i] -= WEIGHT_DECAY * weights[i]; // L2 linearization. Doesn't seem to work */
         m[i] = BETA1 * m[i] + (1 - BETA1) * grad[i];
         v[i] = BETA2 * v[i] + (1 - BETA2) * pow(grad[i], 2.0);
     }
@@ -258,7 +407,9 @@ void adam (float* grad, float* m, float* v, float* weights, uint32_t t) {
         m_[i] = m[i] / (1- pow(BETA1, t));
         v_[i] = v[i] / (1- pow(BETA2, t));
         weights[i] -= (ALPHA * m_[i] / (sqrt(v_[i]) + EPSILON));
+        weight_sum += weights[i];
     }
+    /* printf("Tot weight @%3d:%f\n", t, weight_sum); */
 }
 
 // Note: This function could be removed by extending the weight matrix by LABELS
@@ -304,11 +455,13 @@ int main() {
     uint32_t * adj = read_file("adj.bin");
     float * adj_weights = read_float_file("adj_weights.bin"); // Should actually be dataUnion type
     float * features = read_float_file("features.bin");
+    struct CSR CSR_features = read_CSR("CSR_values.bin", "CSR_Idx.bin", "CSR_Ptr.bin");
     uint32_t * labels = read_file("labels.bin");
     float * degree = generate_degree_matrix(adj);
     dataUnion * s = generate_normalised_adj_matrix(adj, adj_weights, degree);
     for (uint32_t i = 0; i < DEGREE; i++) {
         features = sparse_matrix_mult(s, features);
+        CSR_features = sparse_matrix_mult_CSR(s, CSR_features);
     }
 
     clock_t end = clock();
@@ -320,7 +473,6 @@ int main() {
     begin = clock();
     // Weights are transposed from python: LABELS x FEATURE_DEPTH
     float * weights = read_float_file("python_starting_weights.bin"); // transposed
-    printf("ALIVE\n");
     float * biases = read_float_file("python_starting_biases.bin");
     float * infered_res = calloc(LABELS * GRAPH_SIZE, sizeof(float));
     // TODO create randomised training sub-goup
@@ -352,11 +504,15 @@ int main() {
         /* printf("infered20: %f weight20 : %f\n", infered_res[20], weights[20]); */
         if (epoch == 1 || epoch == EPOCHS)
             printf("Cross entropy %d: %f \n", epoch, cross_entropy(infered_res, labels));
-        gradients (features, infered_res, labels, grad, bias_grad);
+        gradients (features, weights, biases, infered_res, labels, grad, bias_grad);
         adam(grad, m, v, weights, epoch);
         adam_biases(bias_grad, m_b, v_b, biases, epoch);
     }
 
+
+    end = clock();
+    time_spent = (double)(end - begin) / CLOCKS_PER_SEC;
+    printf("Inference time: %lf\n", time_spent);
 
     for (uint32_t i = VAL_START; i <= VAL_END; i++) {
         infer(features, weights, biases, infered_res, i);
@@ -369,10 +525,6 @@ int main() {
         soft_max(infered_res, i);
     }
     printf("Test ACCURACY: %f\n", accuracy(infered_res, labels, TEST_START, TEST_END));
-
-    end = clock();
-    time_spent = (double)(end - begin) / CLOCKS_PER_SEC;
-    printf("Inference time: %lf\n", time_spent);
 
     printf("ending biases: ");
     for (uint32_t i = 0; i < LABELS; i++){
