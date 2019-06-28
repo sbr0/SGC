@@ -234,11 +234,7 @@ struct CSR sparse_matrix_mult_CSR(dataUnion * s, struct CSR features) {
     new_features.idx = malloc(nf_size); 
     new_features.ptr = malloc(GRAPH_SIZE * sizeof(uint32_t)); 
     uint32_t nf_count = 0;
-    FILE *f2 = fopen("c_precomp_CSR2.bin", "wb");
-    if (f2 == NULL) {
-        printf("Error opening file!\n");
-        exit(1);
-    }
+
     while (base_node < nb_nodes) {
         /* printf("ALIVE %d i: %d nf_count: %d\n", base_node, i, nf_count); */
         float* CSR_dense_row = calloc(FEATURE_DEPTH, sizeof(float));
@@ -254,19 +250,15 @@ struct CSR sparse_matrix_mult_CSR(dataUnion * s, struct CSR features) {
                 next_row = features.ptr[dest_node + 1];
             } else {
                 next_row = features.val_length;
-                printf("next_row = %d idx: %lu 0: %lu \n", next_row, sizeof(features.idx), sizeof(features.idx[0]));
             }
             m = next_row - row_start;
             for (uint32_t j = 0; j < m; j++) {
                 CSR_dense_row[features.idx[row_start + j]] += adj_weight * features.val[row_start + j]; 
-                /* new_features[base_node*FEATURE_DEPTH + j] += adj_weight * features[dest_node*FEATURE_DEPTH + j]; */
             }
         }
-        /* printf("ALIVE %d i: %d nf_count: %d\n", base_node, i, nf_count); */
         // Dense row is now complete, convert to CSR format.
         new_features.ptr[base_node] = nf_count;
         for (uint32_t j = 0; j < FEATURE_DEPTH; j++) {
-            fwrite(&CSR_dense_row[j], sizeof(float), 1, f2);
             if (CSR_dense_row[j] != 0) {
                 new_features.val[nf_count] = CSR_dense_row[j];
                 new_features.idx[nf_count] = j;
@@ -281,13 +273,12 @@ struct CSR sparse_matrix_mult_CSR(dataUnion * s, struct CSR features) {
         free(CSR_dense_row);
         base_node++;
     }
-    fclose(f2);
 
     new_features.val = realloc(new_features.val, nf_count * sizeof(float));
     new_features.idx = realloc(new_features.idx, nf_count * sizeof(float));
     new_features.val_length = nf_count;
 
-    // Print result to file
+    // Print result to file to compare result
     // Converts back to dense format for a 1 to 1 comparison
     FILE *f = fopen("c_precomp_CSR.bin", "wb");
     if (f == NULL) {
@@ -303,13 +294,10 @@ struct CSR sparse_matrix_mult_CSR(dataUnion * s, struct CSR features) {
         } else {
             nb_nodes = nf_count - nf_pos;
         }
-        // TODO fix difference btw printed and real
-        printf("nbNodes : %d\n", nb_nodes);
         for (uint32_t j = 0; j < FEATURE_DEPTH; j++) {
             if (j == new_features.idx[nf_pos]) {
                 fwrite(&new_features.val[nf_pos], sizeof(float), 1, f);
-                printf("X\n");
-                if (nf_pos - nb_nodes < new_features.ptr[i]) {
+                if (nf_pos < new_features.ptr[i] + nb_nodes) {
                     nf_pos++;
                 }
             } else {
