@@ -8,7 +8,7 @@
 #define GRAPH_SIZE 2708
 #define FEATURE_DEPTH 1433
 #define LABELS 7
-#define DEGREE 1
+#define DEGREE 3
 #define ALPHA 0.2
 #define BETA1 0.9
 #define BETA2 0.999
@@ -326,7 +326,46 @@ void infer (float* features, float* weights, float* biases, float* infered_res, 
     }
 }
 
-void soft_max (float* vector, uint32_t n) {
+// calculates inference for a range of nodes, with features in CSR format
+// infered_res must be pre-allocated and zeroed.
+void infer_CSR (struct CSR features, float* weights, float* biases, float* infered_res, uint32_t start, uint32_t end) {
+    uint32_t node, label, base_pos, nb_features, feat_pos, i;
+    for (node = start; node <= end; node++) {
+        base_pos = features.ptr[node];
+        if (node < GRAPH_SIZE - 1) {
+            nb_features = features.ptr[node + 1] - base_pos;
+        } else {
+            nb_features = features.val_length - base_pos;
+        }
+        for (label = 0; label < LABELS; label++ ) {
+            infered_res[node*LABELS + label] = biases[label];
+            for (i = 0; i < nb_features; i++) {
+                feat_pos = base_pos + i;
+                infered_res[node*LABELS + label] += weights[label*FEATURE_DEPTH + features.idx[feat_pos]] * features.val[feat_pos];
+            }
+        }
+    }
+}
+
+void soft_max (float* infered_res, uint32_t start, uint32_t end) {
+    uint32_t node, i;
+    for (node = start; node <= end; node++) {
+        float max = 0, sum = 0;
+        for (i = 0; i < LABELS; i++) {
+            float temp = infered_res[node*LABELS + i];
+            if (temp > max)
+                max = temp;
+        }
+        for (i = 0; i < LABELS; i++) {
+            infered_res[node*LABELS + i] -= max;
+            sum += exp(infered_res[node*LABELS + i]);
+        }
+        for (i = 0; i < LABELS; i++) {
+            infered_res[node*LABELS + i] = exp(infered_res[node*LABELS + i]) / sum;
+        }
+    }
+}
+void soft_max_old (float* vector, uint32_t n) {
     float max = 0, sum = 0;
     uint32_t i;
     for (i = 0; i < LABELS; i++) {
@@ -356,6 +395,7 @@ float cross_entropy (float* vector, uint32_t* labels) {
     return cross_entropy / (TRAIN_END - TRAIN_START +1);
 }
 
+// TODO adapt for CSR
 // gradients [LABELS][FEATURE_DEPTH]
 void gradients (float* features, float* weights, float* biases, float* infered_res, uint32_t* labels, float* grad, float* bias_grad){
     for (uint32_t i = 0; i < LABELS; i++) {
@@ -463,6 +503,7 @@ int main() {
     float * weights = read_float_file("python_starting_weights.bin"); // transposed
     float * biases = read_float_file("python_starting_biases.bin");
     float * infered_res = calloc(LABELS * GRAPH_SIZE, sizeof(float));
+    float * infered_res_CSR = calloc(LABELS * GRAPH_SIZE, sizeof(float));
     // TODO create randomised training sub-goup
     float * grad = calloc(LABELS * FEATURE_DEPTH, sizeof(float));
     float * bias_grad = calloc(LABELS, sizeof(float));
@@ -484,18 +525,40 @@ int main() {
     }
     printf("\n");
 
-    for (uint32_t epoch = 1; epoch < EPOCHS+1; epoch++) {
-        for (uint32_t i = TRAIN_START; i <= TRAIN_END; i++) {
-            infer(features, weights, biases, infered_res, i);
-            soft_max(infered_res, i);
-        }
-        /* printf("infered20: %f weight20 : %f\n", infered_res[20], weights[20]); */
-        if (epoch == 1 || epoch == EPOCHS)
-            printf("Cross entropy %d: %f \n", epoch, cross_entropy(infered_res, labels));
-        gradients (features, weights, biases, infered_res, labels, grad, bias_grad);
-        adam(grad, m, v, weights, epoch);
-        adam_biases(bias_grad, m_b, v_b, biases, epoch);
+    infer_CSR (CSR_features, weights, biases, infered_res_CSR, TRAIN_START, TRAIN_END);
+    soft_max(infered_res_CSR, TRAIN_START, TRAIN_END);
+    for (uint32_t i = TRAIN_START; i <= TRAIN_END; i++) {
+        infer(features, weights, biases, infered_res, i);
+        soft_max_old(infered_res, i);
     }
+
+    FILE *f = fopen("infered_res_CSR.bin", "wb");
+    FILE *f2 = fopen("infered_res.bin", "wb");
+    if (f == NULL || f2 == NULL) {
+        printf("Error opening file!\n");
+        exit(1);
+    }
+    for(uint32_t i = 0; i < LABELS * GRAPH_SIZE; i++) {
+        fwrite(&infered_res_CSR[i], sizeof(float), 1, f);
+        fwrite(&infered_res[i], sizeof(float), 1, f2);
+    }
+    fclose(f);
+    fclose(f2);
+
+
+    /* for (uint32_t epoch = 1; epoch < EPOCHS+1; epoch++) { */
+    /*     infer_CSR (CSR_features, weights, biases, infered_res, TRAIN_START, TRAIN_END); */
+    /*     for (uint32_t i = TRAIN_START; i <= TRAIN_END; i++) { */
+    /*         /1* infer(features, weights, biases, infered_res, i); *1/ */
+    /*         soft_max(infered_res, i); */
+    /*     } */
+    /*     /1* printf("infered20: %f weight20 : %f\n", infered_res[20], weights[20]); *1/ */
+    /*     if (epoch == 1 || epoch == EPOCHS) */
+    /*         printf("Cross entropy %d: %f \n", epoch, cross_entropy(infered_res, labels)); */
+    /*     gradients (features, weights, biases, infered_res, labels, grad, bias_grad); */
+    /*     adam(grad, m, v, weights, epoch); */
+    /*     adam_biases(bias_grad, m_b, v_b, biases, epoch); */
+    /* } */
 
 
     end = clock();
@@ -504,13 +567,13 @@ int main() {
 
     for (uint32_t i = VAL_START; i <= VAL_END; i++) {
         infer(features, weights, biases, infered_res, i);
-        soft_max(infered_res, i);
+        soft_max_old(infered_res, i);
     }
     printf("Validation ACCURACY: %f\n", accuracy(infered_res, labels, VAL_START, VAL_END));
 
     for (uint32_t i = TEST_START; i <= TEST_END; i++) {
         infer(features, weights, biases, infered_res, i);
-        soft_max(infered_res, i);
+        soft_max_old(infered_res, i);
     }
     printf("Test ACCURACY: %f\n", accuracy(infered_res, labels, TEST_START, TEST_END));
 
@@ -524,5 +587,7 @@ int main() {
     free(degree);
     free(s);
     free(features);
+    free(infered_res);
+    free(infered_res_CSR);
     return 0;
 }
