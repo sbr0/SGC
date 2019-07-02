@@ -395,7 +395,48 @@ float cross_entropy (float* vector, uint32_t* labels) {
     return cross_entropy / (TRAIN_END - TRAIN_START +1);
 }
 
-// TODO adapt for CSR
+// traverse sparse feature matrix only once
+// grad and bias_grad arguments must be zeroed before function call!
+// gradients [LABELS][FEATURE_DEPTH]
+void CSR_gradients (struct CSR features, float* weights, float* biases, float* infered_res, uint32_t* labels, float* grad, float* bias_grad, uint32_t start, uint32_t end) {
+    for (uint32_t node = start; node <= end ; node++) {
+        uint32_t base_pos, nb_features;
+        base_pos = features.ptr[node];
+        if (node < GRAPH_SIZE - 1) {
+            nb_features = features.ptr[node + 1] - base_pos;
+        } else {
+            nb_features = features.val_length - base_pos;
+        }
+        for (uint32_t feat = 0; feat < nb_features; feat++) {
+            uint32_t feat_idx = features.idx[base_pos + feat];
+            for (uint32_t label = 0; label < LABELS; label++) {
+                if (labels[node] == label) {
+                    grad[label*FEATURE_DEPTH + feat_idx] += (infered_res[node*LABELS + label] - 1) * features.val[base_pos + feat];
+                } else {
+                    grad[label*FEATURE_DEPTH + feat_idx] += infered_res[node*LABELS + label] * features.val[base_pos + feat];
+                }
+            } 
+        }
+        // Biases
+        for (uint32_t label = 0; label < LABELS; label++) {
+            if (labels[node] == label) {
+                bias_grad[label] += infered_res[node*LABELS + label] - 1;
+            } else {
+                bias_grad[label] += infered_res[node*LABELS + label];
+            }
+        }
+    }
+    for (uint32_t i = 0; i < LABELS * FEATURE_DEPTH; i++) {
+        /* if (i < 5) */
+        /*     printf("grad %d : %f\n", i, grad[i]); */
+        grad[i] += WEIGHT_DECAY * weights[i];
+    }
+    for (uint32_t label = 0; label < LABELS; label++) {
+        bias_grad[label] += WEIGHT_DECAY * biases[label];
+    }
+}
+
+// OG
 // gradients [LABELS][FEATURE_DEPTH]
 void gradients (float* features, float* weights, float* biases, float* infered_res, uint32_t* labels, float* grad, float* bias_grad){
     for (uint32_t i = 0; i < LABELS; i++) {
@@ -505,8 +546,6 @@ int main() {
     float * infered_res = calloc(LABELS * GRAPH_SIZE, sizeof(float));
     float * infered_res_CSR = calloc(LABELS * GRAPH_SIZE, sizeof(float));
     // TODO create randomised training sub-goup
-    float * grad = calloc(LABELS * FEATURE_DEPTH, sizeof(float));
-    float * bias_grad = calloc(LABELS, sizeof(float));
     float * m = calloc(LABELS * FEATURE_DEPTH, sizeof(float));
     float * v = calloc(LABELS * FEATURE_DEPTH, sizeof(float));
     float * m_b = calloc(LABELS, sizeof(float));
@@ -546,19 +585,25 @@ int main() {
     fclose(f2);
 
 
-    /* for (uint32_t epoch = 1; epoch < EPOCHS+1; epoch++) { */
-    /*     infer_CSR (CSR_features, weights, biases, infered_res, TRAIN_START, TRAIN_END); */
-    /*     for (uint32_t i = TRAIN_START; i <= TRAIN_END; i++) { */
-    /*         /1* infer(features, weights, biases, infered_res, i); *1/ */
-    /*         soft_max(infered_res, i); */
-    /*     } */
-    /*     /1* printf("infered20: %f weight20 : %f\n", infered_res[20], weights[20]); *1/ */
-    /*     if (epoch == 1 || epoch == EPOCHS) */
-    /*         printf("Cross entropy %d: %f \n", epoch, cross_entropy(infered_res, labels)); */
-    /*     gradients (features, weights, biases, infered_res, labels, grad, bias_grad); */
-    /*     adam(grad, m, v, weights, epoch); */
-    /*     adam_biases(bias_grad, m_b, v_b, biases, epoch); */
-    /* } */
+    for (uint32_t epoch = 1; epoch < EPOCHS+1; epoch++) {
+        infer_CSR (CSR_features, weights, biases, infered_res_CSR, TRAIN_START, TRAIN_END);
+        soft_max(infered_res_CSR, TRAIN_START, TRAIN_END);
+        /* for (uint32_t i = TRAIN_START; i <= TRAIN_END; i++) { */
+        /*     infer(features, weights, biases, infered_res, i); */
+        /*     soft_max_old(infered_res, i); */
+        /* } */
+        if (epoch == 1 || epoch == EPOCHS)
+            printf("Cross entropy %d: %f \n", epoch, cross_entropy(infered_res_CSR, labels));
+        float * grad = calloc(LABELS * FEATURE_DEPTH, sizeof(float));
+        float * bias_grad = calloc(LABELS, sizeof(float));
+        /* gradients (features, weights, biases, infered_res, labels, grad, bias_grad); */
+        CSR_gradients (CSR_features, weights, biases, infered_res_CSR, labels, grad, bias_grad, TRAIN_START, TRAIN_END);
+        printf("grad 30: %f weight 30: %f\n", grad[30], weights[30]);
+        adam(grad, m, v, weights, epoch);
+        adam_biases(bias_grad, m_b, v_b, biases, epoch);
+        free(grad);
+        free(bias_grad);
+    }
 
 
     end = clock();
