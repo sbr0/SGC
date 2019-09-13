@@ -36,6 +36,11 @@ struct CSR {
     uint32_t * ptr;
 } CSR;
 
+struct float_array_with_size {
+    uint32_t size;
+    float * array;
+} float_array_with_size;
+
 // mem_file must be freed by caller
 uint32_t* read_file(char* filename) {
     FILE *f;
@@ -69,44 +74,95 @@ float* read_float_file(char* filename) {
     return mem_file;
 } 
 
-struct CSR read_CSR(char* filename_val, char* filename_idx, char* filename_ptr) {
+// mem_file must be freed by caller
+// alternate version of read_float_file that preserves the
+// size information of the array
+struct float_array_with_size read_float_file_with_size(char* filename) {
     FILE *f;
-    uint32_t file_size;
+    struct float_array_with_size array;
+    f = fopen(filename, "rb");
+    if (f == NULL) {
+        fprintf(stderr, "file %s could not be opended, aborting\n", filename);
+    }
+    fseek(f, 0L, SEEK_END);
+    array.size = ftell(f);
+    rewind(f);
+    array.array = malloc(array.size);
+    fread(array.array, 1, array.size, f);
+    fclose(f);
+    
+    return array;
+} 
+
+void write_matrix(char* filename, uint32_t* matrix, uint32_t size) {
+    FILE *f = fopen(filename, "wb");
+    if (f == NULL) {
+        printf("Error opening file!\n");
+        exit(1);
+    }
+    for(int i = 0; i < size; i++) {
+        fwrite(&matrix[i], sizeof(uint32_t), 1, f);
+    }
+    fclose(f);
+}
+
+void write_float_matrix(char* filename, float* matrix, uint32_t size) {
+    FILE *f = fopen(filename, "wb");
+    if (f == NULL) {
+        printf("Error opening file!\n");
+        exit(1);
+    }
+    for(int i = 0; i < size; i++) {
+        fwrite(&matrix[i], sizeof(float), 1, f);
+    }
+    fclose(f);
+}
+
+void write_res(char* filename, struct CSR new_features) {
+
+    // Print result to file to compare result
+    // Converts back to dense format for a 1 to 1 comparison
+    FILE *f = fopen(filename, "wb");
+    if (f == NULL) {
+        printf("Error opening file!\n");
+        exit(1);
+    }
+    for(int i = 0; i < GRAPH_SIZE; i++) {
+        uint32_t nb_nodes, nf_pos;
+        float zero = 0.0;
+        nf_pos = new_features.ptr[i];
+        if ( i < GRAPH_SIZE - 1 ) {
+            nb_nodes = new_features.ptr[i+1] - nf_pos;
+        } else {
+            nb_nodes = new_features.val_length - nf_pos;
+        }
+        for (uint32_t j = 0; j < FEATURE_DEPTH; j++) {
+            if (j == new_features.idx[nf_pos]) {
+                fwrite(&new_features.val[nf_pos], sizeof(float), 1, f);
+                if (nf_pos < new_features.ptr[i] + nb_nodes) {
+                    nf_pos++;
+                }
+            } else {
+                fwrite(&zero, sizeof(float), 1, f);
+            } 
+        }
+    }
+    fclose(f);
+}
+
+/* Generates a Compressed Sparse Row (CSR) struct from
+ * its val, idx and ptr binary data files
+ * */
+struct CSR read_CSR(char* filename_val, char* filename_idx, char* filename_ptr) {
     struct CSR new_CSR;
+    struct float_array_with_size val_array;
 
-    f = fopen(filename_val, "rb");
-    if (f == NULL) {
-        fprintf(stderr, "file %s could not be opended, aborting\n", filename_val);
-    }
-    fseek(f, 0L, SEEK_END);
-    file_size = ftell(f);
-    rewind(f);
-    new_CSR.val = malloc(file_size);
-    fread(new_CSR.val, 1, file_size, f);
-    new_CSR.val_length = file_size / sizeof(float);
-    fclose(f);
+    val_array = read_float_file_with_size(filename_val);
 
-    f = fopen(filename_idx, "rb");
-    if (f == NULL) {
-        fprintf(stderr, "file %s could not be opended, aborting\n", filename_idx);
-    }
-    fseek(f, 0L, SEEK_END);
-    file_size = ftell(f);
-    rewind(f);
-    new_CSR.idx = malloc(file_size);
-    fread(new_CSR.idx, 1, file_size, f);
-    fclose(f);
-
-    f = fopen(filename_ptr, "rb");
-    if (f == NULL) {
-        fprintf(stderr, "file %s could not be opended, aborting\n", filename_ptr);
-    }
-    fseek(f, 0L, SEEK_END);
-    file_size = ftell(f);
-    rewind(f);
-    new_CSR.ptr = malloc(file_size);
-    fread(new_CSR.ptr, 1, file_size, f);
-    fclose(f);
+    new_CSR.val = val_array.array;
+    new_CSR.val_length = val_array.size / sizeof(float);
+    new_CSR.idx = read_file(filename_idx);
+    new_CSR.ptr = read_file(filename_ptr);
     
     return new_CSR;
 }
@@ -125,17 +181,13 @@ float* generate_degree_matrix(uint32_t* adj) {
         node++;
     }
     
-    FILE *f = fopen("c_degree.bin", "wb");
-    if (f == NULL) {
-        printf("Error opening file!\n");
-        exit(1);
-    }
-    for(i = 0; i < size; i++) {
-        fwrite(&degree_matrix[i], sizeof(float), 1, f);
-    }
-    fclose(f);
+    #ifndef ARM_PLATFORM
+        write_float_matrix("c_degree.bin", degree_matrix, size);
+    #endif
+
     return degree_matrix;
 }
+
 
 void* generate_normalised_adj_matrix (uint32_t* adj, float* adj_weights, float* deg) {
     uint32_t i = 0, j = 0, m = 0;
@@ -177,19 +229,13 @@ void* generate_normalised_adj_matrix (uint32_t* adj, float* adj_weights, float* 
         }
         base_node++;
     }
+    // Assumptions that dataunion types of s will both be 32bit are made here
     s = realloc(s, j * sizeof(float)); // fit memory allocation to final size of s
 
-    // Print result to file
-    FILE *f = fopen("c_norm_adj.bin", "wb");
-    if (f == NULL) {
-        printf("Error opening file!\n");
-        exit(1);
-    }
-    for(i = 0; i < j; i++) {
-        fwrite(&s[i], sizeof(float), 1, f);
-    }
-    fclose(f);
-
+    #ifndef ARM_PLATFORM
+        write_float_matrix("c_norm_adj.bin", (float*) s, j);
+    #endif
+        
     return s;
 }
 
@@ -210,17 +256,9 @@ float * sparse_matrix_mult(dataUnion * s, float * features) {
         }
         base_node++;
     }
-    // Print result to file
-    FILE *f = fopen("c_precomp.bin", "wb");
-    if (f == NULL) {
-        printf("Error opening file!\n");
-        exit(1);
-    }
-    for(i = 0; i < nb_nodes*FEATURE_DEPTH; i++) {
-        fwrite(&new_features[i], sizeof(float), 1, f);
-    }
-    fclose(f);
-    free(features);
+    #ifndef ARM_PLATFORM
+        write_float_matrix("c_precomp.bin", new_features, nb_nodes*FEATURE_DEPTH);
+    #endif
     return new_features;
 }
 
@@ -277,35 +315,11 @@ struct CSR sparse_matrix_mult_CSR(dataUnion * s, struct CSR features) {
     new_features.val = realloc(new_features.val, nf_count * sizeof(float));
     new_features.idx = realloc(new_features.idx, nf_count * sizeof(float));
     new_features.val_length = nf_count;
+    
+    #ifndef ARM_PLATFORM
+        write_res("c_precomp_CSR.bin", new_features);
+    #endif
 
-    // Print result to file to compare result
-    // Converts back to dense format for a 1 to 1 comparison
-    FILE *f = fopen("c_precomp_CSR.bin", "wb");
-    if (f == NULL) {
-        printf("Error opening file!\n");
-        exit(1);
-    }
-    for(i = 0; i < GRAPH_SIZE; i++) {
-        uint32_t nb_nodes, nf_pos;
-        float zero = 0.0;
-        nf_pos = new_features.ptr[i];
-        if ( i < GRAPH_SIZE - 1 ) {
-            nb_nodes = new_features.ptr[i+1] - nf_pos;
-        } else {
-            nb_nodes = nf_count - nf_pos;
-        }
-        for (uint32_t j = 0; j < FEATURE_DEPTH; j++) {
-            if (j == new_features.idx[nf_pos]) {
-                fwrite(&new_features.val[nf_pos], sizeof(float), 1, f);
-                if (nf_pos < new_features.ptr[i] + nb_nodes) {
-                    nf_pos++;
-                }
-            } else {
-                fwrite(&zero, sizeof(float), 1, f);
-            } 
-        }
-    }
-    fclose(f);
     free(features.ptr);
     free(features.val);
     free(features.idx);
@@ -319,10 +333,7 @@ void infer (float* features, float* weights, float* biases, float* infered_res, 
         infered_res[n*LABELS + i] = biases[i];
         for (j = 0; j < FEATURE_DEPTH; j++) {
             infered_res[n*LABELS + i] += features[n*FEATURE_DEPTH + j] * weights[i*FEATURE_DEPTH + j];
-            /* if (n == 0 && i == 0 && j < 50) */
-            /*     printf("starting feat %d: %f\n", j, features[j]); */
         }
-            /* if (n==0) printf("infered %d:%d: %f\n", n, i, infered_res[n*LABELS + i]); */
     }
 }
 
@@ -379,7 +390,6 @@ void soft_max_old (float* vector, uint32_t n) {
     }
     for (i = 0; i < LABELS; i++) {
         vector[n*LABELS + i] = exp(vector[n*LABELS + i]) / sum;
-        /* printf("%d : %f\n", i, vector[n*LABELS + i]); */
     }
 }
 
@@ -388,9 +398,7 @@ float cross_entropy (float* vector, uint32_t* labels) {
     float cross_entropy = 0; 
     uint32_t i;
     for (i = TRAIN_START; i <= TRAIN_END; i++) {
-        /* printf("label: %d vector@label: %f\n", labels[i], vector[i*LABELS + labels[i]]); */
         cross_entropy -= log(vector[i*LABELS + labels[i]]);
-        /* printf("%f\n", cross_entropy);//log(vector[i*LABELS + labels[i]])); */
     }
     return cross_entropy / (TRAIN_END - TRAIN_START +1);
 }
