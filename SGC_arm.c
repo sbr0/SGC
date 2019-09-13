@@ -228,19 +228,9 @@ float* generate_degree_matrix(uint32_t* adj) {
         node_l = adj[i];
         i += node_l + 1; // Skip adjacent node numbers
         degree_matrix[node] = 1 / (float)sqrt(node_l + 1); // +1 for the added self_loop
-        // printf("Node: %zu :%f\t", node, degree_matrix[node]);
         node++;
     }
 
-//    FILE *f = fopen("c_degree.bin", "wb");
-//    if (f == NULL) {
-//        printf("Error opening file!\n");
-//        exit(1);
-//    }
-//    for(i = 0; i < size; i++) {
-//        fwrite(&degree_matrix[i], sizeof(float), 1, f);
-//    }
-//    fclose(f);
     return degree_matrix;
 }
 
@@ -286,17 +276,6 @@ void* generate_normalised_adj_matrix (uint32_t* adj, float* adj_weights, float* 
     }
     s = realloc(s, j * sizeof(float)); // fit memory allocation to final size of s
 
-//    // Print result to file
-//    FILE *f = fopen("c_norm_adj.bin", "wb");
-//    if (f == NULL) {
-//        printf("Error opening file!\n");
-//        exit(1);
-//    }
-//    for(i = 0; i < j; i++) {
-//        fwrite(&s[i], sizeof(float), 1, f);
-//    }
-//    fclose(f);
-
     return s;
 }
 
@@ -317,16 +296,6 @@ float * sparse_matrix_mult(dataUnion * s, float * features) {
         }
         base_node++;
     }
-//    // Print result to file
-//    FILE *f = fopen("c_precomp.bin", "wb");
-//    if (f == NULL) {
-//        printf("Error opening file!\n");
-//        exit(1);
-//    }
-//    for(i = 0; i < nb_nodes*FEATURE_DEPTH; i++) {
-//        fwrite(&new_features[i], sizeof(float), 1, f);
-//    }
-//    fclose(f);
     free(features);
     return new_features;
 }
@@ -343,7 +312,6 @@ struct CSR sparse_matrix_mult_CSR(dataUnion * s, struct CSR features) {
     uint32_t nf_count = 0;
 
     while (base_node < nb_nodes) {
-        /* printf("ALIVE %d i: %d nf_count: %d\n", base_node, i, nf_count); */
         float* CSR_dense_row = calloc(FEATURE_DEPTH, sizeof(float));
 
         neighbor_nb = s[i++].u;
@@ -385,34 +353,6 @@ struct CSR sparse_matrix_mult_CSR(dataUnion * s, struct CSR features) {
     new_features.idx = realloc(new_features.idx, nf_count * sizeof(float));
     new_features.val_length = nf_count;
 
-    // Print result to file to compare result
-    // Converts back to dense format for a 1 to 1 comparison
-//    FILE *f = fopen("c_precomp_CSR.bin", "wb");
-//    if (f == NULL) {
-//        printf("Error opening file!\n");
-//        exit(1);
-//    }
-//    for(i = 0; i < GRAPH_SIZE; i++) {
-//        uint32_t nb_nodes, nf_pos;
-//        float zero = 0.0;
-//        nf_pos = new_features.ptr[i];
-//        if ( i < GRAPH_SIZE - 1 ) {
-//            nb_nodes = new_features.ptr[i+1] - nf_pos;
-//        } else {
-//            nb_nodes = nf_count - nf_pos;
-//        }
-//        for (uint32_t j = 0; j < FEATURE_DEPTH; j++) {
-//            if (j == new_features.idx[nf_pos]) {
-//                fwrite(&new_features.val[nf_pos], sizeof(float), 1, f);
-//                if (nf_pos < new_features.ptr[i] + nb_nodes) {
-//                    nf_pos++;
-//                }
-//            } else {
-//                fwrite(&zero, sizeof(float), 1, f);
-//            }
-//        }
-//    }
-//    fclose(f);
     free(features.ptr);
     free(features.val);
     free(features.idx);
@@ -427,10 +367,7 @@ void infer (float* features, float* weights, float* biases, float* infered_res, 
         infered_res[n*LABELS + i] = biases[i];
         for (j = 0; j < FEATURE_DEPTH; j++) {
             infered_res[n*LABELS + i] += features[n*FEATURE_DEPTH + j] * weights[i*FEATURE_DEPTH + j];
-            /* if (n == 0 && i == 0 && j < 50) */
-            /*     printf("starting feat %d: %f\n", j, features[j]); */
         }
-            /* if (n==0) printf("infered %d:%d: %f\n", n, i, infered_res[n*LABELS + i]); */
     }
 }
 
@@ -496,9 +433,7 @@ float cross_entropy (float* vector, uint32_t* labels) {
     float cross_entropy = 0;
     uint32_t i;
     for (i = TRAIN_START; i <= TRAIN_END; i++) {
-        /* printf("label: %d vector@label: %f\n", labels[i], vector[i*LABELS + labels[i]]); */
         cross_entropy -= log(vector[i*LABELS + labels[i]]);
-        /* printf("%f\n", cross_entropy);//log(vector[i*LABELS + labels[i]])); */
     }
     return cross_entropy / (TRAIN_END - TRAIN_START +1);
 }
@@ -625,18 +560,6 @@ float accuracy (float* prediction, uint32_t* truth, uint32_t start_idx, uint32_t
     }
     return ((float)sum / (stop_idx - start_idx + 1));
 }
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -775,20 +698,6 @@ int main() {
         infer(features, weights, biases, infered_res, i);
         soft_max_old(infered_res, i);
     }
-//
-//    FILE *f = fopen("infered_res_CSR.bin", "wb");
-//    FILE *f2 = fopen("infered_res.bin", "wb");
-//    if (f == NULL || f2 == NULL) {
-//        printf("Error opening file!\n");
-//        exit(1);
-//    }
-//    for(uint32_t i = 0; i < LABELS * GRAPH_SIZE; i++) {
-//        fwrite(&infered_res_CSR[i], sizeof(float), 1, f);
-//        fwrite(&infered_res[i], sizeof(float), 1, f2);
-//    }
-//    fclose(f);
-//    fclose(f2);
-//
 
     for (uint32_t epoch = 1; epoch < EPOCHS+1; epoch++) {
         infer_CSR (CSR_features, weights, biases, infered_res_CSR, TRAIN_START, TRAIN_END);
@@ -847,13 +756,3 @@ int main() {
     //fl_shutdown();
 //SD device is not inserted
 }
-
-//int main()
-//{
-//    init_platform();
-//
-//    print("Hello World from APU\n\r");
-//
-//    cleanup_platform();
-//    return 0;
-//}
